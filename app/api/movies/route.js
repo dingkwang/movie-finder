@@ -31,30 +31,20 @@ export async function GET(request) {
   try {
     const showings = await getShowtimes(zip);
 
-    // Group showtimes by tmsId
-    const movieMap = new Map();
-    for (const showing of showings) {
-      const id = showing.tmsId;
-      if (!movieMap.has(id)) {
-        movieMap.set(id, {
-          title: showing.title,
-          tmsId: id,
-          theaters: [],
-        });
+    // TMS returns one entry per movie with nested showtimes[]
+    const movies = showings.map(m => {
+      const theaterMap = new Map();
+      for (const st of m.showtimes ?? []) {
+        const name = st.theatre?.name ?? 'Unknown';
+        if (!theaterMap.has(name)) theaterMap.set(name, []);
+        if (st.dateTime) theaterMap.get(name).push(st.dateTime.slice(11, 16));
       }
-      const entry = movieMap.get(id);
-      const existing = entry.theaters.find(t => t.theater === showing.theatre?.name);
-      if (existing) {
-        existing.times.push(...(showing.dateTime ? [showing.dateTime.slice(11, 16)] : []));
-      } else {
-        entry.theaters.push({
-          theater: showing.theatre?.name ?? 'Unknown',
-          times: showing.dateTime ? [showing.dateTime.slice(11, 16)] : [],
-        });
-      }
-    }
-
-    const movies = Array.from(movieMap.values());
+      return {
+        title: m.title,
+        tmsId: m.tmsId,
+        theaters: Array.from(theaterMap.entries()).map(([theater, times]) => ({ theater, times })),
+      };
+    });
 
     // Parallel TMDB lookups
     const enriched = await Promise.all(
