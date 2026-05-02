@@ -17,10 +17,25 @@ interface Movie {
   source_note: string;
 }
 
+function extractJSON(text: string): { movies: Movie[] } | null {
+  const trimmed = text.trim();
+  // try direct parse
+  try { return JSON.parse(trimmed); } catch { /* continue */ }
+  // strip markdown code fences
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
+  if (fenced) try { return JSON.parse(fenced[1]); } catch { /* continue */ }
+  // find first { ... } block
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start !== -1 && end > start) try { return JSON.parse(trimmed.slice(start, end + 1)); } catch { /* continue */ }
+  return null;
+}
+
 function AiSearch() {
   const searchParams = useSearchParams();
   const [q, setQ] = useState(searchParams.get('q') ?? '');
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [rawText, setRawText] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const didAutoSearch = useRef(false);
@@ -30,11 +45,33 @@ function AiSearch() {
     if (!trimmed) return;
     setStatus('loading');
     setError('');
+    setMovies([]);
+    setRawText('');
+
     try {
       const res = await fetch(`/api/grok-movies?q=${encodeURIComponent(trimmed)}`);
-      const data = await res.json();
-      if (data.error && !data.movies?.length) throw new Error(data.error);
-      setMovies(data.movies ?? []);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+
+      // stream the response
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+      }
+      accumulated += decoder.decode();
+
+      const parsed = extractJSON(accumulated);
+      if (parsed) {
+        setMovies(parsed.movies ?? []);
+      } else {
+        setRawText(accumulated);
+      }
       setStatus('done');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unknown error');
@@ -79,7 +116,7 @@ function AiSearch() {
 
         {status === 'loading' && (
           <p className="text-amber-400 text-center text-sm animate-pulse">
-            Grok 正在搜索网络，稍等几秒…
+            Grok 正在搜索网络，需要 15–30 秒…
           </p>
         )}
 
@@ -87,8 +124,16 @@ function AiSearch() {
           <p className="text-red-400 text-center mb-6">{error}</p>
         )}
 
-        {status === 'done' && movies.length === 0 && (
+        {status === 'done' && movies.length === 0 && !rawText && (
           <p className="text-gray-500 text-center">AI 也没有找到附近的华语电影</p>
+        )}
+
+        {/* fallback: raw text when JSON parsing fails */}
+        {status === 'done' && rawText && (
+          <div className="bg-gray-900 rounded-xl p-6 border border-amber-900/40 text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
+            <span className="text-xs font-semibold bg-amber-600 text-white px-2 py-0.5 rounded-full mb-3 inline-block">AI</span>
+            <p className="mt-2">{rawText}</p>
+          </div>
         )}
 
         {status === 'done' && movies.length > 0 && (
