@@ -116,7 +116,7 @@ function AiSearch() {
 
         {status === 'loading' && (
           <p className="text-amber-400 text-center text-sm animate-pulse">
-            Grok 正在搜索网络，需要 15–30 秒…
+            Grok 正在搜索网络，通常需要 30–90 秒…
           </p>
         )}
 

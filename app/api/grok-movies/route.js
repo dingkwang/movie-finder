@@ -1,7 +1,7 @@
 import { xai } from '@ai-sdk/xai';
 import { streamText } from 'ai';
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function today() {
   return new Date().toISOString().slice(0, 10);

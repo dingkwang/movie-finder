@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
 
 interface Showtime {
   theater: string;
@@ -76,12 +78,12 @@ export default function Home() {
         {status === 'done' && movies.length === 0 && (
           <div className="text-center">
             <p className="text-gray-500 mb-4">{zip} 附近今天没有华语院线排片</p>
-            <a
+            <Link
               href={`/ai?q=${zip}`}
               className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"
             >
               ✨ 用 AI 搜索（含影展 / 专映）
-            </a>
+            </Link>
           </div>
         )}
 
@@ -90,8 +92,9 @@ export default function Home() {
             {movies.map((m, i) => (
               <div key={i} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-gray-600 transition-colors">
                 {m.posterPath ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={m.posterPath} alt={m.title} className="w-full aspect-[2/3] object-cover" />
+                  <div className="relative w-full aspect-[2/3]">
+                    <Image src={m.posterPath} alt={m.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" />
+                  </div>
                 ) : (
                   <div className="w-full aspect-[2/3] bg-gray-800 flex items-center justify-center text-gray-600 text-sm">
                     无海报
