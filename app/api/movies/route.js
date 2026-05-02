@@ -10,7 +10,9 @@ async function getShowtimes(zip) {
   const url = `${TMS_BASE}/movies/showings?startDate=${todayDate()}&zip=${zip}&radius=20&api_key=${process.env.TMS_API_KEY}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`TMS error ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  if (!text.trim()) return [];
+  return JSON.parse(text);
 }
 
 async function tmdbLookup(title) {
