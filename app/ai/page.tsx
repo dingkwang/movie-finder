@@ -19,16 +19,17 @@ interface Movie {
 
 function extractJSON(text: string): { movies: Movie[] } | null {
   const trimmed = text.trim();
-  // try direct parse
   try { return JSON.parse(trimmed); } catch { /* continue */ }
-  // strip markdown code fences
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
   if (fenced) try { return JSON.parse(fenced[1]); } catch { /* continue */ }
-  // find first { ... } block
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');
   if (start !== -1 && end > start) try { return JSON.parse(trimmed.slice(start, end + 1)); } catch { /* continue */ }
   return null;
+}
+
+function fmtTime(s: number) {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 function AiSearch() {
@@ -38,11 +39,23 @@ function AiSearch() {
   const [rawText, setRawText] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [elapsed, setElapsed] = useState(0);
+  const startTimeRef = useRef(0);
   const didAutoSearch = useRef(false);
+
+  useEffect(() => {
+    if (status !== 'loading') return;
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status]);
 
   async function search(query = q) {
     const trimmed = query.trim();
     if (!trimmed) return;
+    startTimeRef.current = Date.now();
+    setElapsed(0);
     setStatus('loading');
     setError('');
     setMovies([]);
@@ -55,7 +68,6 @@ function AiSearch() {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
 
-      // stream the response
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let accumulated = '';
@@ -72,6 +84,7 @@ function AiSearch() {
       } else {
         setRawText(accumulated);
       }
+      setElapsed(Math.round((Date.now() - startTimeRef.current) / 100) / 10);
       setStatus('done');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unknown error');
@@ -96,7 +109,7 @@ function AiSearch() {
           由 Grok 实时搜索，覆盖影展、专映、小影院
         </p>
 
-        <div className="flex gap-3 justify-center mb-10">
+        <div className="flex gap-3 justify-center mb-3">
           <input
             type="text"
             placeholder="城市或邮编，例：San Francisco / 94041"
@@ -110,15 +123,20 @@ function AiSearch() {
             disabled={status === 'loading'}
             className="px-6 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 font-semibold transition-colors"
           >
-            {status === 'loading' ? 'AI 搜索中…' : '搜索'}
+            {status === 'loading' ? `搜索中… ${fmtTime(elapsed)}` : '搜索'}
           </button>
         </div>
 
-        {status === 'loading' && (
-          <p className="text-amber-400 text-center text-sm animate-pulse">
-            Grok 正在搜索网络，通常需要 30–90 秒…
-          </p>
-        )}
+        <div className="h-6 flex items-center justify-center mb-7">
+          {status === 'loading' && (
+            <span className="text-amber-500/70 text-xs">Grok 正在搜索网络…</span>
+          )}
+          {status === 'done' && (
+            <span className="text-xs text-gray-500">
+              {movies.length > 0 ? `找到 ${movies.length} 部` : rawText ? 'AI 回复' : '无结果'} · 用时 {fmtTime(elapsed)}
+            </span>
+          )}
+        </div>
 
         {status === 'error' && (
           <p className="text-red-400 text-center mb-6">{error}</p>
@@ -128,7 +146,6 @@ function AiSearch() {
           <p className="text-gray-500 text-center">AI 也没有找到附近的华语电影</p>
         )}
 
-        {/* fallback: raw text when JSON parsing fails */}
         {status === 'done' && rawText && (
           <div className="bg-gray-900 rounded-xl p-6 border border-amber-900/40 text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
             <span className="text-xs font-semibold bg-amber-600 text-white px-2 py-0.5 rounded-full mb-3 inline-block">AI</span>

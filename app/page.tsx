@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 
@@ -19,11 +19,25 @@ interface Movie {
   theaters: Showtime[];
 }
 
+function fmtTime(s: number) {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
 export default function Home() {
   const [zip, setZip] = useState('');
   const [movies, setMovies] = useState<Movie[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [elapsed, setElapsed] = useState(0);
+  const startTimeRef = useRef(0);
+
+  useEffect(() => {
+    if (status !== 'loading') return;
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status]);
 
   async function search() {
     if (!/^\d{5}$/.test(zip)) {
@@ -31,6 +45,8 @@ export default function Home() {
       setStatus('error');
       return;
     }
+    startTimeRef.current = Date.now();
+    setElapsed(0);
     setStatus('loading');
     setError('');
     try {
@@ -38,6 +54,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'API error');
       setMovies(data);
+      setElapsed(Math.round((Date.now() - startTimeRef.current) / 100) / 10);
       setStatus('done');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unknown error');
@@ -51,7 +68,7 @@ export default function Home() {
         <h1 className="text-3xl font-bold mb-2 text-center">🎬 附近华语院线</h1>
         <p className="text-gray-400 text-center mb-8 text-sm">输入邮编，查找今天在附近放映的华语电影</p>
 
-        <div className="flex gap-3 justify-center mb-10">
+        <div className="flex gap-3 justify-center mb-3">
           <input
             type="text"
             inputMode="numeric"
@@ -67,8 +84,16 @@ export default function Home() {
             disabled={status === 'loading'}
             className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-semibold transition-colors"
           >
-            {status === 'loading' ? '查询中…' : '搜索'}
+            {status === 'loading' ? `查询中… ${fmtTime(elapsed)}` : '搜索'}
           </button>
+        </div>
+
+        <div className="h-6 flex items-center justify-center mb-7">
+          {status === 'done' && (
+            <span className="text-xs text-gray-500">
+              {movies.length > 0 ? `找到 ${movies.length} 部` : '无结果'} · 用时 {fmtTime(elapsed)}
+            </span>
+          )}
         </div>
 
         {status === 'error' && (
