@@ -43,7 +43,7 @@ Include film festival screenings, specialty theaters, and limited releases — n
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-4-1',
+        model: 'grok-4-1-fast-non-reasoning',
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
