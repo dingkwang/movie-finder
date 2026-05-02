@@ -74,9 +74,15 @@ export default function Home() {
         )}
 
         {status === 'done' && movies.length === 0 && (
-          <p className="text-gray-500 text-center">
-            {zip} 附近今天没有华语电影上映
-          </p>
+          <div className="text-center">
+            <p className="text-gray-500 mb-4">{zip} 附近今天没有华语院线排片</p>
+            <a
+              href={`/ai?q=${zip}`}
+              className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"
+            >
+              ✨ 用 AI 搜索（含影展 / 专映）
+            </a>
+          </div>
         )}
 
         {status === 'done' && movies.length > 0 && (
