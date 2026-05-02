@@ -18,7 +18,7 @@ export async function GET(request) {
   }
 
   const result = streamText({
-    model: xai.responses('grok-4.3'),
+    model: xai.responses('grok-4-1-fast-non-reasoning'),
     tools: { webSearch: xai.tools.webSearch() },
     maxSteps: 5,
     system: `You are a Chinese cinema search assistant with real-time web search access.
