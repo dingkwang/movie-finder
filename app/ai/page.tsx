@@ -15,6 +15,7 @@ interface Movie {
   description: string | null;
   theaters: Theater[];
   source_note: string;
+  source_url: string | null;
 }
 
 function extractJSON(text: string): { movies: Movie[] } | null {
@@ -105,8 +106,11 @@ function AiSearch() {
     <main className="min-h-screen bg-gray-950 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold mb-1 text-center">✨ AI 搜索</h1>
-        <p className="text-gray-400 text-center mb-8 text-sm">
+        <p className="text-gray-400 text-center mb-2 text-sm">
           由 Grok 实时搜索，覆盖影展、专映、小影院
+        </p>
+        <p className="text-yellow-600/80 text-center mb-8 text-xs">
+          ⚠️ AI 结果仅供参考，请点击来源链接确认实际放映时间
         </p>
 
         <div className="flex gap-3 justify-center mb-3">
@@ -182,7 +186,13 @@ function AiSearch() {
                       ))}
                     </div>
                   )}
-                  <p className="text-gray-600 text-xs italic truncate">{m.source_note}</p>
+                  {m.source_url ? (
+                    <a href={m.source_url} target="_blank" rel="noopener noreferrer" className="text-amber-600/70 hover:text-amber-500 text-xs underline underline-offset-2 truncate block">
+                      {m.source_note || '查看来源'}
+                    </a>
+                  ) : (
+                    <p className="text-gray-600 text-xs italic truncate">{m.source_note}</p>
+                  )}
                 </div>
               </div>
             ))}

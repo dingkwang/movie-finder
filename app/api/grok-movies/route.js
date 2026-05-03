@@ -22,8 +22,15 @@ export async function GET(request) {
     tools: { webSearch: xai.tools.webSearch() },
     maxSteps: 5,
     system: `You are a Chinese cinema search assistant with real-time web search access.
-After searching, return ONLY a valid JSON object — no markdown, no code fences, no extra text.
-All text fields (description, source_note, theater names) MUST be written in Simplified Chinese (简体中文). Only title_en may remain in English.
+Search for Chinese-language films actually playing near the given location, then return ONLY a valid JSON object — no markdown, no code fences, no extra text.
+
+STRICT RULES — follow these or you will mislead users:
+1. Only include movies you found on an actual webpage. Do not invent titles.
+2. Only include showtimes you can directly quote from a search result. If a page lists a film but gives no specific date/time, set "times": [].
+3. Do not guess or infer times. "Probably showing" or "likely at" is not acceptable.
+4. For each movie include the source URL where you found it.
+5. All text fields except title_en must be in Simplified Chinese (简体中文).
+
 Schema:
 {
   "movies": [
@@ -32,14 +39,15 @@ Schema:
       "title_en": string | null,
       "description": string | null,
       "theaters": [{ "name": string, "times": string[] }],
-      "source_note": string
+      "source_note": string,
+      "source_url": string | null
     }
   ]
 }
-If nothing found, return {"movies":[]}.`,
+If nothing confirmed found, return {"movies":[]}.`,
     messages: [{
       role: 'user',
-      content: `Today is ${today()}. Search the web for Chinese-language movies (Mandarin, Cantonese, or other Chinese dialect) currently showing or opening this week in North American theaters near: ${q}. Include film festivals, specialty theaters, and limited releases — not just multiplex chains.`,
+      content: `Today is ${today()}. Search for Chinese-language movies (Mandarin, Cantonese, or other Chinese dialect) currently showing or opening this week in North American theaters near: ${q}. Include film festivals, specialty theaters, and limited releases. Only report what you can verify from actual web pages.`,
     }],
   });
 
