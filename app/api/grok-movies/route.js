@@ -23,6 +23,7 @@ export async function GET(request) {
     maxSteps: 5,
     system: `You are a Chinese cinema search assistant with real-time web search access.
 After searching, return ONLY a valid JSON object — no markdown, no code fences, no extra text.
+All text fields (description, source_note, theater names) MUST be written in Simplified Chinese (简体中文). Only title_en may remain in English.
 Schema:
 {
   "movies": [

@@ -17,7 +17,7 @@ async function getShowtimes(zip) {
 
 async function tmdbLookup(title) {
   const q = encodeURIComponent(title);
-  const url = `${TMDB_BASE}/search/movie?query=${q}&api_key=${process.env.TMDB_API_KEY}`;
+  const url = `${TMDB_BASE}/search/movie?query=${q}&language=zh-CN&api_key=${process.env.TMDB_API_KEY}`;
   const res = await fetch(url);
   if (!res.ok) return null;
   const data = await res.json();
