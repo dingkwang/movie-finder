@@ -1,10 +1,21 @@
-const CHINESE_LANGS = new Set(['zh', 'cmn', 'yue', 'cn', 'zh-hans', 'zh-hant']);
-const CHINESE_SHOWTIME_RE = /\b(cantonese|mandarin|chinese|putonghua|guangdonghua)\b/i;
+import {
+  candidatePreScore,
+  isAcceptedChineseMovie,
+  isLikelyChineseFromTms,
+  isLikelyChineseSearchCandidate,
+  parseYear,
+  pickBestTmdbResult,
+} from './movie-matching';
+
 const DEFAULT_DAYS = 30;
 const MAX_DAYS = 30;
+const TMDB_DETAIL_CANDIDATE_LIMIT = 8;
 const SEARCH_RADIUS_MILES = 40;
 const TMS_BASE = 'https://data.tmsapi.com/v1.1';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
+const TMDB_LOOKUP_CONCURRENCY = 4;
+
+export const maxDuration = 30;
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -25,6 +36,36 @@ function parseDays(value) {
   return Math.min(days, MAX_DAYS);
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchTmdbJson(url) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url);
+    if (res.ok) return res.json();
+    if (res.status !== 429 || attempt === 2) return null;
+    await wait(500 * (attempt + 1));
+  }
+  return null;
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
 async function getShowtimesForDate(zip, date) {
   if (!process.env.TMS_API_KEY) throw new Error('TMS_API_KEY not configured');
   const url = `${TMS_BASE}/movies/showings?startDate=${date}&zip=${zip}&radius=${SEARCH_RADIUS_MILES}&api_key=${process.env.TMS_API_KEY}`;
@@ -41,88 +82,54 @@ async function getShowtimes(zip, days) {
   return batches.flat();
 }
 
-function normalizeTitle(title) {
-  return (title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function parseYear(value) {
-  const match = String(value ?? '').match(/\b(19|20)\d{2}\b/);
-  return match ? Number(match[0]) : null;
-}
-
-function isChineseLanguage(language) {
-  return CHINESE_LANGS.has(language?.toLowerCase());
-}
-
-function isLikelyChineseFromTms(movie) {
-  if (isChineseLanguage(movie.titleLang) || isChineseLanguage(movie.descriptionLang)) return true;
-  return (movie.showtimes ?? []).some(st => CHINESE_SHOWTIME_RE.test(st.quals ?? ''));
-}
-
-function scoreTmdbResult(movie, tmdb) {
-  let score = 0;
-  const movieTitle = normalizeTitle(movie.title);
-  const tmdbTitle = normalizeTitle(tmdb.title);
-  const tmdbOriginalTitle = normalizeTitle(tmdb.original_title);
-  const movieYear = parseYear(movie.releaseYear) ?? parseYear(movie.releaseDate);
-  const tmdbYear = parseYear(tmdb.release_date);
-  const exactTitle = tmdbTitle === movieTitle || tmdbOriginalTitle === movieTitle;
-  const titleContains = movieTitle.length > 3 && (
-    tmdbTitle.includes(movieTitle) || tmdbOriginalTitle.includes(movieTitle)
-  );
-  const chineseLanguage = isChineseLanguage(tmdb.original_language);
-  const chineseTmsSignal = isLikelyChineseFromTms(movie);
-
-  if (exactTitle) score += 80;
-  else if (titleContains) score += 20;
-  if (chineseLanguage && chineseTmsSignal) score += 100;
-  if (chineseLanguage && !chineseTmsSignal && !exactTitle && !titleContains) score -= 100;
-
-  if (movieYear && tmdbYear) {
-    const distance = Math.abs(movieYear - tmdbYear);
-    if (distance === 0) score += 25;
-    else if (distance === 1) score += 8;
-    else score -= Math.min(distance, 10);
-  }
-
-  return score;
-}
-
-function pickBestTmdbResult(movie, results = []) {
-  return results
-    .filter(Boolean)
-    .sort((a, b) => scoreTmdbResult(movie, b) - scoreTmdbResult(movie, a))[0] ?? null;
-}
-
 async function tmdbSearch(title, year) {
   if (!process.env.TMDB_API_KEY) throw new Error('TMDB_API_KEY not configured');
   const q = encodeURIComponent(title);
   const yearParam = year ? `&year=${year}` : '';
   const url = `${TMDB_BASE}/search/movie?query=${q}&language=zh-CN${yearParam}&api_key=${process.env.TMDB_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.results ?? [];
+  const data = await fetchTmdbJson(url);
+  return data?.results ?? [];
+}
+
+async function tmdbDetails(id) {
+  if (!process.env.TMDB_API_KEY) throw new Error('TMDB_API_KEY not configured');
+  const zhUrl = `${TMDB_BASE}/movie/${id}?language=zh-CN&append_to_response=alternative_titles,external_ids&api_key=${process.env.TMDB_API_KEY}`;
+  const enUrl = `${TMDB_BASE}/movie/${id}?language=en-US&append_to_response=credits&api_key=${process.env.TMDB_API_KEY}`;
+  const [zh, en] = await Promise.all([fetchTmdbJson(zhUrl), fetchTmdbJson(enUrl)]);
+  if (!zh) return null;
+  return { ...zh, credits: en?.credits ?? zh.credits };
 }
 
 async function tmdbLookup(movie) {
-  const initialResults = await tmdbSearch(movie.title);
-  const initialBest = pickBestTmdbResult(movie, initialResults);
-  if (initialBest && isChineseLanguage(initialBest.original_language)) return initialBest;
-
   const year = parseYear(movie.releaseYear) ?? parseYear(movie.releaseDate);
-  if (!year || !isLikelyChineseFromTms(movie)) return initialBest;
+  const searches = [tmdbSearch(movie.title)];
+  if (year) searches.push(tmdbSearch(movie.title, year));
+  if (year) searches.push(tmdbSearch(movie.title, year + 1));
 
-  const yearResults = await tmdbSearch(movie.title, year);
+  const searchResults = await Promise.all(searches);
   const byId = new Map();
-  for (const result of [...(initialResults ?? []), ...(yearResults ?? [])]) {
-    byId.set(result.id, result);
+  for (const result of searchResults.flat()) {
+    if (result?.id) byId.set(result.id, result);
   }
-  return pickBestTmdbResult(movie, Array.from(byId.values()));
+
+  const sortedCandidates = Array.from(byId.values())
+    .sort((a, b) => candidatePreScore(movie, b) - candidatePreScore(movie, a));
+  const candidatesById = new Map();
+  for (const candidate of sortedCandidates.filter(isLikelyChineseSearchCandidate)) {
+    candidatesById.set(candidate.id, candidate);
+  }
+  if (isLikelyChineseFromTms(movie)) {
+    for (const candidate of sortedCandidates.slice(0, 3)) {
+      candidatesById.set(candidate.id, candidate);
+    }
+  }
+  const candidates = Array.from(candidatesById.values()).slice(0, TMDB_DETAIL_CANDIDATE_LIMIT);
+  const details = await Promise.all(candidates.map(candidate => tmdbDetails(candidate.id)));
+  return pickBestTmdbResult(movie, details.filter(Boolean));
 }
 
 function movieKey(movie) {
-  return movie.tmsId ?? movie.rootId ?? normalizeTitle(movie.title);
+  return movie.tmsId ?? movie.rootId ?? movie.title?.toLowerCase();
 }
 
 function mergeShowings(showings) {
@@ -184,6 +191,8 @@ export async function GET(request) {
         titleLang: m.titleLang,
         descriptionLang: m.descriptionLang,
         longDescription: m.longDescription,
+        topCast: m.topCast ?? [],
+        directors: m.directors ?? [],
         theaters: Array.from(theaterMap.entries()).map(([theater, data]) => {
           return {
             theater,
@@ -196,16 +205,16 @@ export async function GET(request) {
     });
 
     // Parallel TMDB lookups
-    const enriched = await Promise.all(
-      movies.map(async (m) => {
+    const enriched = await mapWithConcurrency(
+      movies,
+      TMDB_LOOKUP_CONCURRENCY,
+      async (m) => {
         const tmdb = await tmdbLookup(m);
         return { ...m, tmdb };
-      })
+      }
     );
 
-    const chinese = enriched.filter(
-      m => (m.tmdb && isChineseLanguage(m.tmdb.original_language)) || isLikelyChineseFromTms(m)
-    );
+    const chinese = enriched.filter(m => isAcceptedChineseMovie(m, m.tmdb));
 
     const result = chinese.map(m => ({
       title: m.title,
