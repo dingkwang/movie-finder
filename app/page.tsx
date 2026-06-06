@@ -23,8 +23,15 @@ function fmtTime(s: number) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+const rangeOptions = [
+  { days: 1, label: '今天' },
+  { days: 7, label: '7 天' },
+  { days: 30, label: '30 天' },
+];
+
 export default function Home() {
   const [zip, setZip] = useState('');
+  const [days, setDays] = useState(30);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
@@ -50,7 +57,7 @@ export default function Home() {
     setStatus('loading');
     setError('');
     try {
-      const res = await fetch(`/api/movies?zip=${zip}`);
+      const res = await fetch(`/api/movies?zip=${zip}&days=${days}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'API error');
       setMovies(data);
@@ -66,9 +73,9 @@ export default function Home() {
     <main className="min-h-screen bg-gray-950 text-white px-4 py-12">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold mb-2 text-center">🎬 附近华语院线</h1>
-        <p className="text-gray-400 text-center mb-8 text-sm">输入邮编，查找今天在附近放映的华语电影</p>
+        <p className="text-gray-400 text-center mb-8 text-sm">输入邮编，查找附近已有排片的华语电影</p>
 
-        <div className="flex gap-3 justify-center mb-3">
+        <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-3">
           <input
             type="text"
             inputMode="numeric"
@@ -79,6 +86,22 @@ export default function Home() {
             onKeyDown={e => e.key === 'Enter' && search()}
             className="w-40 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:border-blue-500 text-center text-lg tracking-widest"
           />
+          <div className="inline-flex rounded-lg border border-gray-700 bg-gray-900 p-1">
+            {rangeOptions.map(option => (
+              <button
+                key={option.days}
+                type="button"
+                onClick={() => setDays(option.days)}
+                className={`h-9 min-w-16 px-3 rounded-md text-sm font-medium transition-colors ${
+                  days === option.days
+                    ? 'bg-gray-100 text-gray-950'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={search}
             disabled={status === 'loading'}
@@ -102,7 +125,7 @@ export default function Home() {
 
         {status === 'done' && movies.length === 0 && (
           <div className="text-center">
-            <p className="text-gray-500 mb-4">{zip} 附近今天没有华语院线排片</p>
+            <p className="text-gray-500 mb-4">{zip} 附近未来 {days} 天没有华语院线排片</p>
             <Link
               href={`/ai?q=${zip}`}
               className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"
