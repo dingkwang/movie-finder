@@ -20,6 +20,17 @@ interface Movie {
   theaters: Showtime[];
 }
 
+interface DateShowing {
+  time: string;
+  theater: string;
+  ticketUrl: string | null;
+}
+
+interface ShowtimeDateGroup {
+  date: string;
+  showings: DateShowing[];
+}
+
 function fmtTime(s: number) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
@@ -30,12 +41,50 @@ const rangeOptions = [
   { days: 30, label: '30 天' },
 ];
 
-const visibleTimesCount = 6;
+const visibleShowingsPerDate = 8;
+
+function movieKey(movie: Movie) {
+  return `${movie.title}-${movie.releaseDate}`;
+}
+
+function splitShowtimeLabel(label: string) {
+  const match = label.match(/^(\d{2}-\d{2})\s+(.+)$/);
+  if (!match) return { date: '今天', time: label };
+  return { date: match[1], time: match[2] };
+}
+
+function groupShowtimesByDate(movie: Movie): ShowtimeDateGroup[] {
+  const groups = new Map<string, DateShowing[]>();
+
+  for (const theater of movie.theaters) {
+    for (const label of theater.times) {
+      const { date, time } = splitShowtimeLabel(label);
+      if (!groups.has(date)) groups.set(date, []);
+      groups.get(date)?.push({
+        time,
+        theater: theater.theater,
+        ticketUrl: theater.ticketUrl,
+      });
+    }
+  }
+
+  return Array.from(groups.entries())
+    .map(([date, showings]) => ({
+      date,
+      showings: showings.sort((a, b) => {
+        const timeOrder = a.time.localeCompare(b.time);
+        if (timeOrder !== 0) return timeOrder;
+        return a.theater.localeCompare(b.theater);
+      }),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
 
 export default function Home() {
   const [zip, setZip] = useState('');
   const [days, setDays] = useState(30);
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
@@ -59,6 +108,7 @@ export default function Home() {
     setElapsed(0);
     setStatus('loading');
     setError('');
+    setExpandedMovies({});
     try {
       const res = await fetch(`/api/movies?zip=${zip}&days=${days}`);
       const data = await res.json();
@@ -140,8 +190,17 @@ export default function Home() {
 
         {status === 'done' && movies.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {movies.map((m, i) => (
-              <div key={i} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-gray-600 transition-colors">
+            {movies.map((m, i) => {
+              const key = movieKey(m);
+              const expanded = Boolean(expandedMovies[key]);
+              const dateGroups = groupShowtimesByDate(m);
+              const showtimeCount = dateGroups.reduce((sum, group) => sum + group.showings.length, 0);
+              const nextDateGroup = dateGroups[0];
+              const nextShowing = nextDateGroup?.showings[0];
+              const firstTicketUrl = m.theaters.find(theater => theater.ticketUrl)?.ticketUrl;
+
+              return (
+              <div key={key || i} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-gray-600 transition-colors">
                 {m.posterPath ? (
                   <div className="relative w-full aspect-[2/3]">
                     <Image src={m.posterPath} alt={m.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" />
@@ -159,56 +218,94 @@ export default function Home() {
                   {m.overview && (
                     <p className="text-gray-500 text-xs mt-2 line-clamp-3">{m.overview}</p>
                   )}
-                  <div className="mt-4 space-y-2">
-                    {m.theaters.map((t, j) => {
-                      const visibleTimes = t.times.slice(0, visibleTimesCount);
-                      const hiddenCount = Math.max(t.times.length - visibleTimes.length, 0);
-
-                      return (
-                      <div key={j} className="border-t border-gray-800 pt-2 first:border-t-0 first:pt-0">
-                        <div className="flex items-center gap-2">
-                          {t.ticketUrl ? (
-                            <a
-                              href={t.ticketUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="min-w-0 flex-1 truncate text-xs text-blue-400 font-medium hover:text-blue-300 underline-offset-2 hover:underline"
-                            >
-                              {t.theater}
-                            </a>
-                          ) : (
-                            <p className="min-w-0 flex-1 truncate text-xs text-blue-400 font-medium">{t.theater}</p>
-                          )}
-                          {t.ticketUrl && (
-                            <a
-                              href={t.ticketUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="shrink-0 rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-300 hover:border-blue-400 hover:text-white"
-                            >
-                              购票
-                            </a>
-                          )}
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {visibleTimes.map(time => (
-                            <span key={time} className="rounded bg-gray-800 px-1.5 py-0.5 text-[11px] text-gray-300">
-                              {time}
-                            </span>
-                          ))}
-                          {hiddenCount > 0 && (
-                            <span className="rounded bg-gray-950 px-1.5 py-0.5 text-[11px] text-gray-500">
-                              还有 {hiddenCount} 场
-                            </span>
-                          )}
-                        </div>
+                  <div className="mt-4 border-t border-gray-800 pt-3">
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-gray-300">
+                          {dateGroups.length} 天 · {m.theaters.length} 家影院 · {showtimeCount} 场
+                        </p>
+                        {nextDateGroup && nextShowing && (
+                          <p className="mt-1 truncate text-[11px] text-gray-500">
+                            下一场 {nextDateGroup.date} {nextShowing.time} · {nextShowing.theater}
+                          </p>
+                        )}
                       </div>
-                      );
-                    })}
+                      {firstTicketUrl && (
+                        <a
+                          href={firstTicketUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 rounded border border-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:border-blue-400 hover:text-white"
+                        >
+                          购票
+                        </a>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedMovies(current => ({ ...current, [key]: !expanded }))}
+                      className="mt-3 w-full rounded-md bg-gray-800 px-3 py-2 text-xs font-medium text-gray-200 hover:bg-gray-700"
+                    >
+                      {expanded ? '隐藏排片' : '展开排片'}
+                    </button>
                   </div>
+                  {expanded && (
+                    <div className="mt-3 space-y-3">
+                      {dateGroups.map(group => {
+                        const visibleShowings = group.showings.slice(0, visibleShowingsPerDate);
+                        const hiddenCount = Math.max(group.showings.length - visibleShowings.length, 0);
+
+                        return (
+                        <div key={group.date} className="border-t border-gray-800 pt-3 first:border-t-0 first:pt-0">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-gray-200">{group.date}</p>
+                            {hiddenCount > 0 && (
+                              <span className="rounded bg-gray-950 px-1.5 py-0.5 text-[11px] text-gray-500">
+                                还有 {hiddenCount} 场
+                              </span>
+                            )}
+                          </div>
+                          <div className="space-y-1.5">
+                            {visibleShowings.map(showing => (
+                              <div key={`${showing.time}-${showing.theater}`} className="flex items-center gap-2 text-xs">
+                                <span className="w-11 shrink-0 rounded bg-gray-800 px-1.5 py-0.5 text-center text-[11px] text-gray-300">
+                                  {showing.time}
+                                </span>
+                                {showing.ticketUrl ? (
+                                  <a
+                                    href={showing.ticketUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="min-w-0 flex-1 truncate text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
+                                  >
+                                    {showing.theater}
+                                  </a>
+                                ) : (
+                                  <span className="min-w-0 flex-1 truncate text-gray-300">{showing.theater}</span>
+                                )}
+                                {showing.ticketUrl && (
+                                  <a
+                                    href={showing.ticketUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="shrink-0 rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-300 hover:border-blue-400 hover:text-white"
+                                  >
+                                    购票
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
