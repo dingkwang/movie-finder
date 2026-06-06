@@ -63,7 +63,7 @@ function AiSearch() {
     setRawText('');
 
     try {
-      const res = await fetch(`/api/grok-movies?q=${encodeURIComponent(trimmed)}`);
+      const res = await fetch(`/api/ai-movies?q=${encodeURIComponent(trimmed)}`);
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -107,7 +107,7 @@ function AiSearch() {
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold mb-1 text-center">✨ AI 搜索</h1>
         <p className="text-gray-400 text-center mb-2 text-sm">
-          由 Grok 实时搜索，覆盖影展、专映、小影院
+          实时搜索网络，覆盖影展、专映、小影院
         </p>
         <p className="text-yellow-600/80 text-center mb-8 text-xs">
           ⚠️ AI 结果仅供参考，请点击来源链接确认实际放映时间
@@ -133,7 +133,7 @@ function AiSearch() {
 
         <div className="h-6 flex items-center justify-center mb-7">
           {status === 'loading' && (
-            <span className="text-amber-500/70 text-xs">Grok 正在搜索网络…</span>
+            <span className="text-amber-500/70 text-xs">正在搜索网络…</span>
           )}
           {status === 'done' && (
             <span className="text-xs text-gray-500">

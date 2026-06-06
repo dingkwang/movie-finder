@@ -14,6 +14,9 @@ const SEARCH_RADIUS_MILES = 40;
 const TMS_BASE = 'https://data.tmsapi.com/v1.1';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_LOOKUP_CONCURRENCY = 4;
+const STANDARD_SEARCH_CACHE_SECONDS = 60 * 60 * 6;
+const STANDARD_SEARCH_STALE_SECONDS = 60 * 60 * 12;
+const TMDB_CACHE_SECONDS = 60 * 60 * 24 * 30;
 
 export const maxDuration = 30;
 
@@ -40,9 +43,20 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function successCacheHeaders() {
+  return {
+    'Cache-Control': `public, s-maxage=${STANDARD_SEARCH_CACHE_SECONDS}, stale-while-revalidate=${STANDARD_SEARCH_STALE_SECONDS}`,
+  };
+}
+
 async function fetchTmdbJson(url) {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      next: {
+        revalidate: TMDB_CACHE_SECONDS,
+        tags: ['tmdb-movies'],
+      },
+    });
     if (res.ok) return res.json();
     if (res.status !== 429 || attempt === 2) return null;
     await wait(500 * (attempt + 1));
@@ -69,7 +83,12 @@ async function mapWithConcurrency(items, limit, mapper) {
 async function getShowtimesForDate(zip, date) {
   if (!process.env.TMS_API_KEY) throw new Error('TMS_API_KEY not configured');
   const url = `${TMS_BASE}/movies/showings?startDate=${date}&zip=${zip}&radius=${SEARCH_RADIUS_MILES}&api_key=${process.env.TMS_API_KEY}`;
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    next: {
+      revalidate: STANDARD_SEARCH_CACHE_SECONDS,
+      tags: [`tms-showtimes-${zip}-${date}`],
+    },
+  });
   if (!res.ok) throw new Error(`TMS error ${res.status}`);
   const text = await res.text();
   if (!text.trim()) return [];
@@ -228,7 +247,7 @@ export async function GET(request) {
       theaters: m.theaters,
     }));
 
-    return Response.json(result);
+    return Response.json(result, { headers: successCacheHeaders() });
   } catch (err) {
     console.error(err);
     return Response.json({ error: err.message }, { status: 500 });
