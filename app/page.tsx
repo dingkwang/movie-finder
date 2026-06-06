@@ -7,6 +7,7 @@ import Link from 'next/link';
 interface Showtime {
   theater: string;
   times: string[];
+  ticketUrl: string | null;
 }
 
 interface Movie {
@@ -28,6 +29,8 @@ const rangeOptions = [
   { days: 7, label: '7 天' },
   { days: 30, label: '30 天' },
 ];
+
+const visibleTimesCount = 6;
 
 export default function Home() {
   const [zip, setZip] = useState('');
@@ -157,12 +160,51 @@ export default function Home() {
                     <p className="text-gray-500 text-xs mt-2 line-clamp-3">{m.overview}</p>
                   )}
                   <div className="mt-4 space-y-2">
-                    {m.theaters.map((t, j) => (
-                      <div key={j}>
-                        <p className="text-xs text-blue-400 font-medium truncate">{t.theater}</p>
-                        <p className="text-xs text-gray-400">{t.times.join('  ')}</p>
+                    {m.theaters.map((t, j) => {
+                      const visibleTimes = t.times.slice(0, visibleTimesCount);
+                      const hiddenCount = Math.max(t.times.length - visibleTimes.length, 0);
+
+                      return (
+                      <div key={j} className="border-t border-gray-800 pt-2 first:border-t-0 first:pt-0">
+                        <div className="flex items-center gap-2">
+                          {t.ticketUrl ? (
+                            <a
+                              href={t.ticketUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="min-w-0 flex-1 truncate text-xs text-blue-400 font-medium hover:text-blue-300 underline-offset-2 hover:underline"
+                            >
+                              {t.theater}
+                            </a>
+                          ) : (
+                            <p className="min-w-0 flex-1 truncate text-xs text-blue-400 font-medium">{t.theater}</p>
+                          )}
+                          {t.ticketUrl && (
+                            <a
+                              href={t.ticketUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="shrink-0 rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-300 hover:border-blue-400 hover:text-white"
+                            >
+                              购票
+                            </a>
+                          )}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {visibleTimes.map(time => (
+                            <span key={time} className="rounded bg-gray-800 px-1.5 py-0.5 text-[11px] text-gray-300">
+                              {time}
+                            </span>
+                          ))}
+                          {hiddenCount > 0 && (
+                            <span className="rounded bg-gray-950 px-1.5 py-0.5 text-[11px] text-gray-500">
+                              还有 {hiddenCount} 场
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>

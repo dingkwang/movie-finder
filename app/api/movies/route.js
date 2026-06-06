@@ -146,6 +146,10 @@ function formatShowtime(dateTime, days) {
   return `${dateTime.slice(5, 10)} ${time}`;
 }
 
+function normalizeTicketUrl(url) {
+  return url?.replace(/^http:/, 'https:') ?? null;
+}
+
 export async function GET(request) {
   const zip = request.nextUrl.searchParams.get('zip');
   if (!zip || !/^\d{5}$/.test(zip)) {
@@ -164,9 +168,13 @@ export async function GET(request) {
       });
       for (const st of sortedShowtimes) {
         const name = st.theatre?.name ?? 'Unknown';
-        if (!theaterMap.has(name)) theaterMap.set(name, []);
+        if (!theaterMap.has(name)) {
+          theaterMap.set(name, { times: [], ticketUrl: normalizeTicketUrl(st.ticketURI) });
+        }
         const time = formatShowtime(st.dateTime, days);
-        if (time) theaterMap.get(name).push(time);
+        const theater = theaterMap.get(name);
+        if (time) theater.times.push(time);
+        if (!theater.ticketUrl) theater.ticketUrl = normalizeTicketUrl(st.ticketURI);
       }
       return {
         title: m.title,
@@ -176,8 +184,12 @@ export async function GET(request) {
         titleLang: m.titleLang,
         descriptionLang: m.descriptionLang,
         longDescription: m.longDescription,
-        theaters: Array.from(theaterMap.entries()).map(([theater, times]) => {
-          return { theater, times: Array.from(new Set(times)) };
+        theaters: Array.from(theaterMap.entries()).map(([theater, data]) => {
+          return {
+            theater,
+            ticketUrl: data.ticketUrl,
+            times: Array.from(new Set(data.times)),
+          };
         }),
         showtimes: sortedShowtimes,
       };
