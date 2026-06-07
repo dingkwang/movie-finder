@@ -19,6 +19,8 @@ export async function POST(request) {
     eventType,
     zip: body.zip,
     days: body.days,
+    startDate: body.startDate ?? body.start_date,
+    endDate: body.endDate ?? body.end_date,
     radius: body.radius,
     resultCount: body.resultCount,
     durationMs: body.durationMs,

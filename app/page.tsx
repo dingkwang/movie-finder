@@ -43,6 +43,34 @@ const rangeOptions = [
 
 const visibleShowingsPerDate = 8;
 
+function todayDateString() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateString: string, offset: number) {
+  const date = new Date(`${dateString}T12:00:00`);
+  date.setDate(date.getDate() + offset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function daysBetweenInclusive(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T12:00:00`).getTime();
+  const end = new Date(`${endDate}T12:00:00`).getTime();
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+function dateRangeLabel(startDate: string, endDate: string) {
+  if (startDate === endDate) return startDate;
+  return `${startDate} 至 ${endDate}`;
+}
+
 function movieKey(movie: Movie) {
   return `${movie.title}-${movie.releaseDate}`;
 }
@@ -83,6 +111,8 @@ function groupShowtimesByDate(movie: Movie): ShowtimeDateGroup[] {
 function trackMovieSearch(payload: {
   zip: string;
   days: number;
+  startDate: string;
+  endDate: string;
   resultCount?: number;
   durationMs?: number;
   status: 'success' | 'empty' | 'error';
@@ -101,14 +131,43 @@ function trackMovieSearch(payload: {
 }
 
 export default function Home() {
+  const today = todayDateString();
+  const maxDate = addDays(today, 29);
   const [zip, setZip] = useState('');
-  const [days, setDays] = useState(30);
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(maxDate);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const startTimeRef = useRef(0);
+  const days = daysBetweenInclusive(startDate, endDate);
+  const activeRangeDays = rangeOptions.find(option => {
+    return startDate === today && endDate === addDays(today, option.days - 1);
+  })?.days;
+  const endDateMax = addDays(startDate, Math.min(29, daysBetweenInclusive(startDate, maxDate) - 1));
+
+  function setPresetRange(nextDays: number) {
+    setStartDate(today);
+    setEndDate(addDays(today, nextDays - 1));
+  }
+
+  function updateStartDate(value: string) {
+    const nextStart = value < today ? today : value > maxDate ? maxDate : value;
+    setStartDate(nextStart);
+    setEndDate(current => {
+      if (current < nextStart) return nextStart;
+      const nextMax = addDays(nextStart, Math.min(29, daysBetweenInclusive(nextStart, maxDate) - 1));
+      return current > nextMax ? nextMax : current;
+    });
+  }
+
+  function updateEndDate(value: string) {
+    const nextMax = addDays(startDate, Math.min(29, daysBetweenInclusive(startDate, maxDate) - 1));
+    const nextEnd = value < startDate ? startDate : value > nextMax ? nextMax : value;
+    setEndDate(nextEnd);
+  }
 
   useEffect(() => {
     if (status !== 'loading') return;
@@ -124,13 +183,19 @@ export default function Home() {
       setStatus('error');
       return;
     }
+    if (startDate < today || endDate < today || startDate > endDate || endDate > maxDate) {
+      setError('请选择今天起 30 天内的日期范围');
+      setStatus('error');
+      return;
+    }
     startTimeRef.current = Date.now();
     setElapsed(0);
     setStatus('loading');
     setError('');
     setExpandedMovies({});
     try {
-      const res = await fetch(`/api/movies?zip=${zip}&days=${days}`);
+      const params = new URLSearchParams({ zip, startDate, endDate });
+      const res = await fetch(`/api/movies?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'API error');
       setMovies(data);
@@ -140,6 +205,8 @@ export default function Home() {
       trackMovieSearch({
         zip,
         days,
+        startDate,
+        endDate,
         resultCount: Array.isArray(data) ? data.length : 0,
         durationMs,
         status: Array.isArray(data) && data.length > 0 ? 'success' : 'empty',
@@ -151,6 +218,8 @@ export default function Home() {
       trackMovieSearch({
         zip,
         days,
+        startDate,
+        endDate,
         durationMs: Date.now() - startTimeRef.current,
         status: 'error',
         error: message,
@@ -180,9 +249,9 @@ export default function Home() {
               <button
                 key={option.days}
                 type="button"
-                onClick={() => setDays(option.days)}
+                onClick={() => setPresetRange(option.days)}
                 className={`h-9 min-w-16 px-3 rounded-md text-sm font-medium transition-colors ${
-                  days === option.days
+                  activeRangeDays === option.days
                     ? 'bg-gray-100 text-gray-950'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800'
                 }`}
@@ -190,6 +259,25 @@ export default function Home() {
                 {option.label}
               </button>
             ))}
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1">
+            <input
+              type="date"
+              value={startDate}
+              min={today}
+              max={maxDate}
+              onChange={e => updateStartDate(e.target.value)}
+              className="h-8 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
+            />
+            <span className="text-xs text-gray-500">至</span>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate}
+              max={endDateMax}
+              onChange={e => updateEndDate(e.target.value)}
+              className="h-8 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
+            />
           </div>
           <button
             onClick={search}
@@ -203,7 +291,7 @@ export default function Home() {
         <div className="h-6 flex items-center justify-center mb-7">
           {status === 'done' && (
             <span className="text-xs text-gray-500">
-              {movies.length > 0 ? `找到 ${movies.length} 部` : '无结果'} · 用时 {fmtTime(elapsed)}
+              {movies.length > 0 ? `找到 ${movies.length} 部` : '无结果'} · {dateRangeLabel(startDate, endDate)} · 用时 {fmtTime(elapsed)}
             </span>
           )}
         </div>
@@ -214,7 +302,7 @@ export default function Home() {
 
         {status === 'done' && movies.length === 0 && (
           <div className="text-center">
-            <p className="text-gray-500 mb-4">{zip} 附近未来 {days} 天没有华语院线排片</p>
+            <p className="text-gray-500 mb-4">{zip} 附近 {dateRangeLabel(startDate, endDate)} 没有华语院线排片</p>
             <Link
               href={`/ai?q=${zip}`}
               className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"

@@ -51,6 +51,8 @@ async function ensureUsageTable() {
           event_type text not null,
           zip text,
           days int,
+          start_date date,
+          end_date date,
           radius int,
           result_count int,
           duration_ms int,
@@ -71,6 +73,8 @@ async function ensureUsageTable() {
         db`alter table usage_events add column if not exists tmdb_search_count int`,
         db`alter table usage_events add column if not exists tmdb_detail_count int`,
         db`alter table usage_events add column if not exists tmdb_request_count int`,
+        db`alter table usage_events add column if not exists start_date date`,
+        db`alter table usage_events add column if not exists end_date date`,
       ]);
       await Promise.all([
         db`create index if not exists usage_events_created_at_idx on usage_events (created_at desc)`,
@@ -126,6 +130,12 @@ function textOrNull(value, maxLength = 500) {
   return text.slice(0, maxLength);
 }
 
+function dateOrNull(value) {
+  const text = textOrNull(value, 10);
+  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  return text;
+}
+
 export async function recordUsageEvent(event, request) {
   if (!usageDatabaseConfigured()) return { enabled: false };
 
@@ -139,6 +149,8 @@ export async function recordUsageEvent(event, request) {
         event_type,
         zip,
         days,
+        start_date,
+        end_date,
         radius,
         result_count,
         duration_ms,
@@ -156,6 +168,8 @@ export async function recordUsageEvent(event, request) {
         ${textOrNull(event.eventType ?? event.event_type, 80) ?? 'unknown'},
         ${textOrNull(event.zip, 16)},
         ${intOrNull(event.days)},
+        ${dateOrNull(event.startDate ?? event.start_date)},
+        ${dateOrNull(event.endDate ?? event.end_date)},
         ${intOrNull(event.radius ?? DEFAULT_RADIUS_MILES)},
         ${intOrNull(event.resultCount ?? event.result_count)},
         ${intOrNull(event.durationMs ?? event.duration_ms)},
@@ -238,13 +252,22 @@ export async function getUsageDashboardData() {
       limit 10
     `,
     db`
-      select days, count(*)::int as searches
+      select
+        coalesce(
+          case
+            when start_date is not null and end_date is not null and start_date = end_date then to_char(start_date, 'YYYY-MM-DD')
+            when start_date is not null and end_date is not null then to_char(start_date, 'YYYY-MM-DD') || ' 至 ' || to_char(end_date, 'YYYY-MM-DD')
+            else null
+          end,
+          days::text || ' 天'
+        ) as range_label,
+        count(*)::int as searches
       from usage_events
       where event_type = 'movie_search'
-        and days is not null
+        and (days is not null or start_date is not null)
         and created_at >= now() - interval '30 days'
-      group by days
-      order by days
+      group by range_label
+      order by min(start_date) nulls last, min(days)
     `,
     db`
       select
@@ -252,6 +275,8 @@ export async function getUsageDashboardData() {
         event_type,
         zip,
         days,
+        to_char(start_date, 'YYYY-MM-DD') as start_date,
+        to_char(end_date, 'YYYY-MM-DD') as end_date,
         radius,
         result_count,
         duration_ms,
@@ -274,6 +299,8 @@ export async function getUsageDashboardData() {
         created_at,
         zip,
         days,
+        to_char(start_date, 'YYYY-MM-DD') as start_date,
+        to_char(end_date, 'YYYY-MM-DD') as end_date,
         result_count,
         duration_ms,
         tms_request_count,
@@ -292,6 +319,8 @@ export async function getUsageDashboardData() {
         created_at,
         zip,
         days,
+        to_char(start_date, 'YYYY-MM-DD') as start_date,
+        to_char(end_date, 'YYYY-MM-DD') as end_date,
         result_count,
         duration_ms,
         tms_request_count,
@@ -312,6 +341,8 @@ export async function getUsageDashboardData() {
         event_type,
         zip,
         days,
+        to_char(start_date, 'YYYY-MM-DD') as start_date,
+        to_char(end_date, 'YYYY-MM-DD') as end_date,
         status,
         error
       from usage_events

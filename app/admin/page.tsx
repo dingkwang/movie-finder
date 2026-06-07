@@ -36,7 +36,7 @@ interface TopZipRow {
 }
 
 interface DayRangeRow {
-  days: number;
+  range_label: string;
   searches: number;
 }
 
@@ -45,6 +45,8 @@ interface RecentRow {
   event_type: string;
   zip: string | null;
   days: number | null;
+  start_date: string | null;
+  end_date: string | null;
   radius: number | null;
   result_count: number | null;
   duration_ms: number | null;
@@ -64,6 +66,8 @@ interface SlowRow {
   created_at: string | Date;
   zip: string | null;
   days: number | null;
+  start_date: string | null;
+  end_date: string | null;
   result_count: number | null;
   duration_ms: number | null;
   tms_request_count: number | null;
@@ -81,6 +85,8 @@ interface ErrorRow {
   event_type: string;
   zip: string | null;
   days: number | null;
+  start_date: string | null;
+  end_date: string | null;
   status: string | null;
   error: string | null;
 }
@@ -127,6 +133,18 @@ function formatDateTime(value: string | Date) {
 
 function metricLabel(value: string | null | undefined) {
   return value || '-';
+}
+
+function formatSearchRange(row: {
+  days?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}) {
+  if (row.start_date && row.end_date) {
+    return row.start_date === row.end_date ? row.start_date : `${row.start_date} 至 ${row.end_date}`;
+  }
+  if (row.days) return `${row.days} 天`;
+  return '-';
 }
 
 function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -281,9 +299,9 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
             />
           </section>
           <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-            <h2 className="mb-4 text-sm font-semibold text-gray-200">搜索天数</h2>
+            <h2 className="mb-4 text-sm font-semibold text-gray-200">搜索日期</h2>
             <BarList
-              rows={data.dayRanges.map(row => ({ label: `${row.days} 天`, value: row.searches }))}
+              rows={data.dayRanges.map(row => ({ label: row.range_label, value: row.searches }))}
             />
           </section>
         </div>
@@ -300,7 +318,7 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
                     <th className="whitespace-nowrap px-3 py-2 font-medium">时间</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">事件</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">ZIP</th>
-                    <th className="whitespace-nowrap px-3 py-2 font-medium">天数</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">日期范围</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">结果</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">耗时</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">TMS</th>
@@ -317,7 +335,7 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
                       <td className="whitespace-nowrap px-3 py-2">{formatDateTime(row.created_at)}</td>
                       <td className="whitespace-nowrap px-3 py-2">{row.event_type}</td>
                       <td className="whitespace-nowrap px-3 py-2">{metricLabel(row.zip)}</td>
-                      <td className="whitespace-nowrap px-3 py-2">{row.days ?? '-'}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{formatSearchRange(row)}</td>
                       <td className="whitespace-nowrap px-3 py-2">{row.result_count ?? '-'}</td>
                       <td className="whitespace-nowrap px-3 py-2">{formatDuration(row.duration_ms)}</td>
                       <td className="whitespace-nowrap px-3 py-2">{row.tms_request_count ?? '-'}</td>
@@ -352,7 +370,7 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
                   <div key={`${row.created_at}-${index}`} className="text-sm">
                     <div className="flex items-center justify-between gap-3">
                       <span className="min-w-0 truncate text-gray-300">
-                        {formatDateTime(row.created_at)} · {metricLabel(row.zip)} · {row.days ?? '-'} 天
+                        {formatDateTime(row.created_at)} · {metricLabel(row.zip)} · {formatSearchRange(row)}
                       </span>
                       <span className="shrink-0 text-gray-500">{formatDuration(row.duration_ms)}</span>
                     </div>
@@ -377,7 +395,7 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
                     <div key={`${row.created_at}-${index}`} className="text-sm">
                       <div className="flex items-center justify-between gap-3">
                         <span className="min-w-0 truncate text-gray-300">
-                          {formatDateTime(row.created_at)} · {metricLabel(row.zip)} · {row.days ?? '-'} 天
+                          {formatDateTime(row.created_at)} · {metricLabel(row.zip)} · {formatSearchRange(row)}
                         </span>
                         <span className="shrink-0 text-gray-500">{formatNumber(total)} fetches</span>
                       </div>
