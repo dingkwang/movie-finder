@@ -14,7 +14,7 @@ export async function GET(request) {
   }
 
   if (!process.env.XAI_API_KEY) {
-    return Response.json({ error: 'XAI_API_KEY not configured' }, { status: 500 });
+    return Response.json({ error: 'AI search is not configured' }, { status: 500 });
   }
 
   const result = streamText({
