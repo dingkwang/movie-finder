@@ -8,8 +8,8 @@ import {
 } from './movie-matching';
 import { recordUsageEvent } from '../../lib/usage';
 
-const DEFAULT_RANGE_DAYS = 30;
-const MAX_RANGE_DAYS = 30;
+const DEFAULT_DAY_OFFSET = 0;
+const MAX_DAY_OFFSET = 29;
 const APP_TIME_ZONE = 'America/Los_Angeles';
 const TMDB_DETAIL_CANDIDATE_LIMIT = 8;
 const SEARCH_RADIUS_MILES = 40;
@@ -46,58 +46,51 @@ function addDays(dateString, offset) {
   return formatUtcDate(date);
 }
 
-function daysBetweenInclusive(startDate, endDate) {
-  const start = Date.parse(`${startDate}T12:00:00Z`);
-  const end = Date.parse(`${endDate}T12:00:00Z`);
-  return Math.round((end - start) / 86400000) + 1;
-}
-
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return false;
   const date = new Date(`${value}T12:00:00Z`);
   return Number.isFinite(date.getTime()) && formatUtcDate(date) === value;
 }
 
-function dateRange(startDate, endDate) {
-  const days = daysBetweenInclusive(startDate, endDate);
-  return Array.from({ length: days }, (_, index) => addDays(startDate, index));
-}
-
-function parseSearchRange(searchParams) {
+function parseSearchDate(searchParams) {
   const today = todayDateString();
-  const maxDate = addDays(today, MAX_RANGE_DAYS - 1);
-  const startParam = searchParams.get('startDate');
-  const endParam = searchParams.get('endDate');
+  const maxDate = addDays(today, MAX_DAY_OFFSET);
+  const dateParam = searchParams.get('date');
 
-  if (startParam || endParam) {
-    const startDate = startParam || today;
-    const endDate = endParam || startDate;
-    if (!isValidDateString(startDate) || !isValidDateString(endDate)) {
+  if (dateParam) {
+    if (!isValidDateString(dateParam)) {
       throw new Error('日期格式必须是 YYYY-MM-DD');
     }
-    if (startDate < today || endDate < today) {
+    if (dateParam < today) {
       throw new Error('只能查询今天或未来日期');
     }
-    if (startDate > endDate) {
-      throw new Error('结束日期不能早于开始日期');
-    }
-    if (endDate > maxDate) {
+    if (dateParam > maxDate) {
       throw new Error('最多只能查询未来 30 天内的日期');
     }
-    const days = daysBetweenInclusive(startDate, endDate);
-    if (days > MAX_RANGE_DAYS) {
-      throw new Error('日期范围最多 30 天');
-    }
-    return { startDate, endDate, days, dates: dateRange(startDate, endDate) };
+    return { date: dateParam, days: 1 };
   }
 
-  const requestedDays = Number(searchParams.get('days') ?? DEFAULT_RANGE_DAYS);
-  const days = Number.isInteger(requestedDays) && requestedDays > 0
-    ? Math.min(requestedDays, MAX_RANGE_DAYS)
-    : DEFAULT_RANGE_DAYS;
-  const startDate = today;
-  const endDate = addDays(today, days - 1);
-  return { startDate, endDate, days, dates: dateRange(startDate, endDate) };
+  const startParam = searchParams.get('startDate');
+  const endParam = searchParams.get('endDate');
+  if (startParam || endParam) {
+    const legacyDate = startParam || endParam || today;
+    if (!isValidDateString(legacyDate)) {
+      throw new Error('日期格式必须是 YYYY-MM-DD');
+    }
+    if (legacyDate < today) {
+      throw new Error('只能查询今天或未来日期');
+    }
+    if (legacyDate > maxDate) {
+      throw new Error('最多只能查询未来 30 天内的日期');
+    }
+    return { date: legacyDate, days: 1 };
+  }
+
+  const requestedDays = Number(searchParams.get('days'));
+  const dayOffset = Number.isInteger(requestedDays) && requestedDays > 0
+    ? Math.min(requestedDays - 1, MAX_DAY_OFFSET)
+    : DEFAULT_DAY_OFFSET;
+  return { date: addDays(today, dayOffset), days: 1 };
 }
 
 function wait(ms) {
@@ -170,9 +163,8 @@ async function getShowtimesForDate(zip, date, metrics) {
   return JSON.parse(text);
 }
 
-async function getShowtimes(zip, dates, metrics) {
-  const batches = await Promise.all(dates.map(date => getShowtimesForDate(zip, date, metrics)));
-  return batches.flat();
+async function getShowtimes(zip, date, metrics) {
+  return getShowtimesForDate(zip, date, metrics);
 }
 
 async function tmdbSearch(title, year, metrics) {
@@ -242,11 +234,9 @@ function mergeShowings(showings) {
   return Array.from(byMovie.values());
 }
 
-function formatShowtime(dateTime, includeDate) {
+function formatShowtime(dateTime) {
   if (!dateTime) return null;
-  const time = dateTime.slice(11, 16);
-  if (!includeDate) return time;
-  return `${dateTime.slice(5, 10)} ${time}`;
+  return dateTime.slice(11, 16);
 }
 
 function normalizeTicketUrl(url) {
@@ -260,17 +250,16 @@ export async function GET(request) {
   if (!zip || !/^\d{5}$/.test(zip)) {
     return Response.json({ error: 'Valid 5-digit zip required' }, { status: 400 });
   }
-  let range;
+  let searchDate;
   try {
-    range = parseSearchRange(request.nextUrl.searchParams);
+    searchDate = parseSearchDate(request.nextUrl.searchParams);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 400 });
   }
-  const { startDate, endDate, days, dates } = range;
-  const includeShowtimeDate = days > 1 || startDate !== todayDateString();
+  const { date, days } = searchDate;
 
   try {
-    const showings = mergeShowings(await getShowtimes(zip, dates, metrics));
+    const showings = mergeShowings(await getShowtimes(zip, date, metrics));
 
     // TMS returns one entry per movie with nested showtimes[]
     const movies = showings.map(m => {
@@ -283,7 +272,7 @@ export async function GET(request) {
         if (!theaterMap.has(name)) {
           theaterMap.set(name, { times: [], ticketUrl: normalizeTicketUrl(st.ticketURI) });
         }
-        const time = formatShowtime(st.dateTime, includeShowtimeDate);
+        const time = formatShowtime(st.dateTime);
         const theater = theaterMap.get(name);
         if (time) theater.times.push(time);
         if (!theater.ticketUrl) theater.ticketUrl = normalizeTicketUrl(st.ticketURI);
@@ -337,8 +326,8 @@ export async function GET(request) {
       eventType: 'movie_search_backend',
       zip,
       days,
-      startDate,
-      endDate,
+      startDate: date,
+      endDate: date,
       radius: SEARCH_RADIUS_MILES,
       resultCount: result.length,
       durationMs: Date.now() - startedAt,
@@ -356,8 +345,8 @@ export async function GET(request) {
       eventType: 'movie_search_backend',
       zip,
       days,
-      startDate,
-      endDate,
+      startDate: date,
+      endDate: date,
       radius: SEARCH_RADIUS_MILES,
       durationMs: Date.now() - startedAt,
       tmsRequestCount: metrics.tmsRequestCount,

@@ -318,7 +318,7 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
                     <th className="whitespace-nowrap px-3 py-2 font-medium">时间</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">事件</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">ZIP</th>
-                    <th className="whitespace-nowrap px-3 py-2 font-medium">日期范围</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">查询日期</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">结果</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">耗时</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">TMS</th>
