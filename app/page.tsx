@@ -80,6 +80,26 @@ function groupShowtimesByDate(movie: Movie): ShowtimeDateGroup[] {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function trackMovieSearch(payload: {
+  zip: string;
+  days: number;
+  resultCount?: number;
+  durationMs?: number;
+  status: 'success' | 'empty' | 'error';
+  error?: string;
+}) {
+  void fetch('/api/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    keepalive: true,
+    body: JSON.stringify({
+      eventType: 'movie_search',
+      radius: 40,
+      ...payload,
+    }),
+  }).catch(() => {});
+}
+
 export default function Home() {
   const [zip, setZip] = useState('');
   const [days, setDays] = useState(30);
@@ -114,11 +134,27 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'API error');
       setMovies(data);
-      setElapsed(Math.round((Date.now() - startTimeRef.current) / 100) / 10);
+      const durationMs = Date.now() - startTimeRef.current;
+      setElapsed(Math.round(durationMs / 100) / 10);
       setStatus('done');
+      trackMovieSearch({
+        zip,
+        days,
+        resultCount: Array.isArray(data) ? data.length : 0,
+        durationMs,
+        status: Array.isArray(data) && data.length > 0 ? 'success' : 'empty',
+      });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      setError(message);
       setStatus('error');
+      trackMovieSearch({
+        zip,
+        days,
+        durationMs: Date.now() - startTimeRef.current,
+        status: 'error',
+        error: message,
+      });
     }
   }
 

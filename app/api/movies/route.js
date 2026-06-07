@@ -6,6 +6,7 @@ import {
   parseYear,
   pickBestTmdbResult,
 } from './movie-matching';
+import { recordUsageEvent } from '../../lib/usage';
 
 const DEFAULT_DAYS = 30;
 const MAX_DAYS = 30;
@@ -43,14 +44,27 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function createApiMetrics() {
+  return {
+    tmsRequestCount: 0,
+    tmdbSearchCount: 0,
+    tmdbDetailCount: 0,
+    get tmdbRequestCount() {
+      return this.tmdbSearchCount + this.tmdbDetailCount;
+    },
+  };
+}
+
 function successCacheHeaders() {
   return {
     'Cache-Control': `public, s-maxage=${STANDARD_SEARCH_CACHE_SECONDS}, stale-while-revalidate=${STANDARD_SEARCH_STALE_SECONDS}`,
   };
 }
 
-async function fetchTmdbJson(url) {
+async function fetchTmdbJson(url, metrics, requestType) {
   for (let attempt = 0; attempt < 3; attempt++) {
+    if (requestType === 'search') metrics.tmdbSearchCount++;
+    if (requestType === 'detail') metrics.tmdbDetailCount++;
     const res = await fetch(url, {
       next: {
         revalidate: TMDB_CACHE_SECONDS,
@@ -80,9 +94,10 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
-async function getShowtimesForDate(zip, date) {
+async function getShowtimesForDate(zip, date, metrics) {
   if (!process.env.TMS_API_KEY) throw new Error('TMS_API_KEY not configured');
   const url = `${TMS_BASE}/movies/showings?startDate=${date}&zip=${zip}&radius=${SEARCH_RADIUS_MILES}&api_key=${process.env.TMS_API_KEY}`;
+  metrics.tmsRequestCount++;
   const res = await fetch(url, {
     next: {
       revalidate: STANDARD_SEARCH_CACHE_SECONDS,
@@ -95,35 +110,38 @@ async function getShowtimesForDate(zip, date) {
   return JSON.parse(text);
 }
 
-async function getShowtimes(zip, days) {
+async function getShowtimes(zip, days, metrics) {
   const dates = Array.from({ length: days }, (_, i) => dateWithOffset(i));
-  const batches = await Promise.all(dates.map(date => getShowtimesForDate(zip, date)));
+  const batches = await Promise.all(dates.map(date => getShowtimesForDate(zip, date, metrics)));
   return batches.flat();
 }
 
-async function tmdbSearch(title, year) {
+async function tmdbSearch(title, year, metrics) {
   if (!process.env.TMDB_API_KEY) throw new Error('TMDB_API_KEY not configured');
   const q = encodeURIComponent(title);
   const yearParam = year ? `&year=${year}` : '';
   const url = `${TMDB_BASE}/search/movie?query=${q}&language=zh-CN${yearParam}&api_key=${process.env.TMDB_API_KEY}`;
-  const data = await fetchTmdbJson(url);
+  const data = await fetchTmdbJson(url, metrics, 'search');
   return data?.results ?? [];
 }
 
-async function tmdbDetails(id) {
+async function tmdbDetails(id, metrics) {
   if (!process.env.TMDB_API_KEY) throw new Error('TMDB_API_KEY not configured');
   const zhUrl = `${TMDB_BASE}/movie/${id}?language=zh-CN&append_to_response=alternative_titles,external_ids&api_key=${process.env.TMDB_API_KEY}`;
   const enUrl = `${TMDB_BASE}/movie/${id}?language=en-US&append_to_response=credits&api_key=${process.env.TMDB_API_KEY}`;
-  const [zh, en] = await Promise.all([fetchTmdbJson(zhUrl), fetchTmdbJson(enUrl)]);
+  const [zh, en] = await Promise.all([
+    fetchTmdbJson(zhUrl, metrics, 'detail'),
+    fetchTmdbJson(enUrl, metrics, 'detail'),
+  ]);
   if (!zh) return null;
   return { ...zh, credits: en?.credits ?? zh.credits };
 }
 
-async function tmdbLookup(movie) {
+async function tmdbLookup(movie, metrics) {
   const year = parseYear(movie.releaseYear) ?? parseYear(movie.releaseDate);
-  const searches = [tmdbSearch(movie.title)];
-  if (year) searches.push(tmdbSearch(movie.title, year));
-  if (year) searches.push(tmdbSearch(movie.title, year + 1));
+  const searches = [tmdbSearch(movie.title, undefined, metrics)];
+  if (year) searches.push(tmdbSearch(movie.title, year, metrics));
+  if (year) searches.push(tmdbSearch(movie.title, year + 1, metrics));
 
   const searchResults = await Promise.all(searches);
   const byId = new Map();
@@ -143,7 +161,7 @@ async function tmdbLookup(movie) {
     }
   }
   const candidates = Array.from(candidatesById.values()).slice(0, TMDB_DETAIL_CANDIDATE_LIMIT);
-  const details = await Promise.all(candidates.map(candidate => tmdbDetails(candidate.id)));
+  const details = await Promise.all(candidates.map(candidate => tmdbDetails(candidate.id, metrics)));
   return pickBestTmdbResult(movie, details.filter(Boolean));
 }
 
@@ -177,6 +195,8 @@ function normalizeTicketUrl(url) {
 }
 
 export async function GET(request) {
+  const startedAt = Date.now();
+  const metrics = createApiMetrics();
   const zip = request.nextUrl.searchParams.get('zip');
   if (!zip || !/^\d{5}$/.test(zip)) {
     return Response.json({ error: 'Valid 5-digit zip required' }, { status: 400 });
@@ -184,7 +204,7 @@ export async function GET(request) {
   const days = parseDays(request.nextUrl.searchParams.get('days'));
 
   try {
-    const showings = mergeShowings(await getShowtimes(zip, days));
+    const showings = mergeShowings(await getShowtimes(zip, days, metrics));
 
     // TMS returns one entry per movie with nested showtimes[]
     const movies = showings.map(m => {
@@ -228,7 +248,7 @@ export async function GET(request) {
       movies,
       TMDB_LOOKUP_CONCURRENCY,
       async (m) => {
-        const tmdb = await tmdbLookup(m);
+        const tmdb = await tmdbLookup(m, metrics);
         return { ...m, tmdb };
       }
     );
@@ -247,9 +267,36 @@ export async function GET(request) {
       theaters: m.theaters,
     }));
 
+    await recordUsageEvent({
+      eventType: 'movie_search_backend',
+      zip,
+      days,
+      radius: SEARCH_RADIUS_MILES,
+      resultCount: result.length,
+      durationMs: Date.now() - startedAt,
+      tmsRequestCount: metrics.tmsRequestCount,
+      tmdbSearchCount: metrics.tmdbSearchCount,
+      tmdbDetailCount: metrics.tmdbDetailCount,
+      tmdbRequestCount: metrics.tmdbRequestCount,
+      status: result.length > 0 ? 'success' : 'empty',
+    }, request);
+
     return Response.json(result, { headers: successCacheHeaders() });
   } catch (err) {
     console.error(err);
+    await recordUsageEvent({
+      eventType: 'movie_search_backend',
+      zip,
+      days,
+      radius: SEARCH_RADIUS_MILES,
+      durationMs: Date.now() - startedAt,
+      tmsRequestCount: metrics.tmsRequestCount,
+      tmdbSearchCount: metrics.tmdbSearchCount,
+      tmdbDetailCount: metrics.tmdbDetailCount,
+      tmdbRequestCount: metrics.tmdbRequestCount,
+      status: 'error',
+      error: err.message,
+    }, request);
     return Response.json({ error: err.message }, { status: 500 });
   }
 }
