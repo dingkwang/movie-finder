@@ -9,8 +9,8 @@ import {
 } from './movie-matching';
 import { recordUsageEvent } from '../../lib/usage';
 
-const DEFAULT_DAY_OFFSET = 0;
-const MAX_DAY_OFFSET = 29;
+const DEFAULT_RANGE_DAYS = 1;
+const MAX_RANGE_DAYS = 30;
 const APP_TIME_ZONE = 'America/Los_Angeles';
 const TMDB_DETAIL_CANDIDATE_LIMIT = 8;
 const SEARCH_RADIUS_MILES = 40;
@@ -47,15 +47,26 @@ function addDays(dateString, offset) {
   return formatUtcDate(date);
 }
 
+function daysBetweenInclusive(startDate, endDate) {
+  const start = Date.parse(`${startDate}T12:00:00Z`);
+  const end = Date.parse(`${endDate}T12:00:00Z`);
+  return Math.round((end - start) / 86400000) + 1;
+}
+
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return false;
   const date = new Date(`${value}T12:00:00Z`);
   return Number.isFinite(date.getTime()) && formatUtcDate(date) === value;
 }
 
-function parseSearchDate(searchParams) {
+function dateRange(startDate, endDate) {
+  const days = daysBetweenInclusive(startDate, endDate);
+  return Array.from({ length: days }, (_, index) => addDays(startDate, index));
+}
+
+function parseSearchRange(searchParams) {
   const today = todayDateString();
-  const maxDate = addDays(today, MAX_DAY_OFFSET);
+  const maxDate = addDays(today, MAX_RANGE_DAYS - 1);
   const dateParam = searchParams.get('date');
 
   if (dateParam) {
@@ -68,30 +79,40 @@ function parseSearchDate(searchParams) {
     if (dateParam > maxDate) {
       throw new Error('最多只能查询未来 30 天内的日期');
     }
-    return { date: dateParam, days: 1 };
+    return { startDate: dateParam, endDate: dateParam, days: 1, dates: [dateParam] };
   }
 
   const startParam = searchParams.get('startDate');
   const endParam = searchParams.get('endDate');
   if (startParam || endParam) {
-    const legacyDate = startParam || endParam || today;
-    if (!isValidDateString(legacyDate)) {
+    const startDate = startParam || today;
+    const endDate = endParam || startDate;
+    if (!isValidDateString(startDate) || !isValidDateString(endDate)) {
       throw new Error('日期格式必须是 YYYY-MM-DD');
     }
-    if (legacyDate < today) {
+    if (startDate < today || endDate < today) {
       throw new Error('只能查询今天或未来日期');
     }
-    if (legacyDate > maxDate) {
+    if (startDate > endDate) {
+      throw new Error('结束日期不能早于开始日期');
+    }
+    if (endDate > maxDate) {
       throw new Error('最多只能查询未来 30 天内的日期');
     }
-    return { date: legacyDate, days: 1 };
+    const days = daysBetweenInclusive(startDate, endDate);
+    if (days > MAX_RANGE_DAYS) {
+      throw new Error('日期范围最多 30 天');
+    }
+    return { startDate, endDate, days, dates: dateRange(startDate, endDate) };
   }
 
-  const requestedDays = Number(searchParams.get('days'));
-  const dayOffset = Number.isInteger(requestedDays) && requestedDays > 0
-    ? Math.min(requestedDays - 1, MAX_DAY_OFFSET)
-    : DEFAULT_DAY_OFFSET;
-  return { date: addDays(today, dayOffset), days: 1 };
+  const requestedDays = Number(searchParams.get('days') ?? DEFAULT_RANGE_DAYS);
+  const days = Number.isInteger(requestedDays) && requestedDays > 0
+    ? Math.min(requestedDays, MAX_RANGE_DAYS)
+    : DEFAULT_RANGE_DAYS;
+  const startDate = today;
+  const endDate = addDays(today, days - 1);
+  return { startDate, endDate, days, dates: dateRange(startDate, endDate) };
 }
 
 function wait(ms) {
@@ -165,6 +186,10 @@ async function getShowtimesForDate(zip, date, metrics) {
 }
 
 async function getShowtimes(zip, date, metrics) {
+  if (Array.isArray(date)) {
+    const batches = await Promise.all(date.map(item => getShowtimesForDate(zip, item, metrics)));
+    return batches.flat();
+  }
   return getShowtimesForDate(zip, date, metrics);
 }
 
@@ -235,9 +260,11 @@ function mergeShowings(showings) {
   return Array.from(byMovie.values());
 }
 
-function formatShowtime(dateTime) {
+function formatShowtime(dateTime, includeDate) {
   if (!dateTime) return null;
-  return dateTime.slice(11, 16);
+  const time = dateTime.slice(11, 16);
+  if (!includeDate) return time;
+  return `${dateTime.slice(5, 10)} ${time}`;
 }
 
 function normalizeTicketUrl(url) {
@@ -247,20 +274,22 @@ function normalizeTicketUrl(url) {
 export async function GET(request) {
   const startedAt = Date.now();
   const metrics = createApiMetrics();
+  const shouldRecordUsage = request.nextUrl.searchParams.get('prewarm') !== '1';
   const zip = request.nextUrl.searchParams.get('zip');
   if (!zip || !/^\d{5}$/.test(zip)) {
     return Response.json({ error: 'Valid 5-digit zip required' }, { status: 400 });
   }
-  let searchDate;
+  let range;
   try {
-    searchDate = parseSearchDate(request.nextUrl.searchParams);
+    range = parseSearchRange(request.nextUrl.searchParams);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 400 });
   }
-  const { date, days } = searchDate;
+  const { startDate, endDate, days, dates } = range;
+  const includeShowtimeDate = days > 1 || startDate !== todayDateString();
 
   try {
-    const showings = mergeShowings(await getShowtimes(zip, date, metrics));
+    const showings = mergeShowings(await getShowtimes(zip, dates, metrics));
 
     // TMS returns one entry per movie with nested showtimes[]
     const movies = showings.map(m => {
@@ -273,7 +302,7 @@ export async function GET(request) {
         if (!theaterMap.has(name)) {
           theaterMap.set(name, { times: [], ticketUrl: normalizeTicketUrl(st.ticketURI) });
         }
-        const time = formatShowtime(st.dateTime);
+        const time = formatShowtime(st.dateTime, includeShowtimeDate);
         const theater = theaterMap.get(name);
         if (time) theater.times.push(time);
         if (!theater.ticketUrl) theater.ticketUrl = normalizeTicketUrl(st.ticketURI);
@@ -324,40 +353,44 @@ export async function GET(request) {
       theaters: m.theaters,
     }));
 
-    await recordUsageEvent({
-      eventType: 'movie_search_backend',
-      zip,
-      days,
-      startDate: date,
-      endDate: date,
-      radius: SEARCH_RADIUS_MILES,
-      resultCount: result.length,
-      durationMs: Date.now() - startedAt,
-      tmsRequestCount: metrics.tmsRequestCount,
-      tmdbSearchCount: metrics.tmdbSearchCount,
-      tmdbDetailCount: metrics.tmdbDetailCount,
-      tmdbRequestCount: metrics.tmdbRequestCount,
-      status: result.length > 0 ? 'success' : 'empty',
-    }, request);
+    if (shouldRecordUsage) {
+      await recordUsageEvent({
+        eventType: 'movie_search_backend',
+        zip,
+        days,
+        startDate,
+        endDate,
+        radius: SEARCH_RADIUS_MILES,
+        resultCount: result.length,
+        durationMs: Date.now() - startedAt,
+        tmsRequestCount: metrics.tmsRequestCount,
+        tmdbSearchCount: metrics.tmdbSearchCount,
+        tmdbDetailCount: metrics.tmdbDetailCount,
+        tmdbRequestCount: metrics.tmdbRequestCount,
+        status: result.length > 0 ? 'success' : 'empty',
+      }, request);
+    }
 
     return Response.json(result, { headers: successCacheHeaders() });
   } catch (err) {
     console.error(err);
-    await recordUsageEvent({
-      eventType: 'movie_search_backend',
-      zip,
-      days,
-      startDate: date,
-      endDate: date,
-      radius: SEARCH_RADIUS_MILES,
-      durationMs: Date.now() - startedAt,
-      tmsRequestCount: metrics.tmsRequestCount,
-      tmdbSearchCount: metrics.tmdbSearchCount,
-      tmdbDetailCount: metrics.tmdbDetailCount,
-      tmdbRequestCount: metrics.tmdbRequestCount,
-      status: 'error',
-      error: err.message,
-    }, request);
+    if (shouldRecordUsage) {
+      await recordUsageEvent({
+        eventType: 'movie_search_backend',
+        zip,
+        days,
+        startDate,
+        endDate,
+        radius: SEARCH_RADIUS_MILES,
+        durationMs: Date.now() - startedAt,
+        tmsRequestCount: metrics.tmsRequestCount,
+        tmdbSearchCount: metrics.tmdbSearchCount,
+        tmdbDetailCount: metrics.tmdbDetailCount,
+        tmdbRequestCount: metrics.tmdbRequestCount,
+        status: 'error',
+        error: err.message,
+      }, request);
+    }
     return Response.json({ error: err.message }, { status: 500 });
   }
 }

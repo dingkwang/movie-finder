@@ -36,10 +36,21 @@ function fmtTime(s: number) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-const dateOptions = [
-  { offset: 0, label: '今天' },
-  { offset: 6, label: '第 7 天' },
-  { offset: 29, label: '第 30 天' },
+function currentTimeMs() {
+  return Date.now();
+}
+
+const rangeOptions = [
+  { days: 1, label: '今天' },
+  { days: 7, label: '7 天内' },
+  { days: 30, label: '30 天内' },
+];
+
+const popularLocations = [
+  { label: '94041', description: '南湾', zip: '94041' },
+  { label: '旧金山', description: 'Chinatown', zip: '94133' },
+  { label: '法拉盛', description: 'Flushing', zip: '11354' },
+  { label: '曼哈顿', description: 'Chinatown', zip: '10013' },
 ];
 
 const visibleShowingsPerDate = 8;
@@ -59,6 +70,17 @@ function addDays(dateString: string, offset: number) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function daysBetweenInclusive(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T12:00:00`).getTime();
+  const end = new Date(`${endDate}T12:00:00`).getTime();
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+function dateRangeLabel(startDate: string, endDate: string) {
+  if (startDate === endDate) return startDate;
+  return `${startDate} 至 ${endDate}`;
 }
 
 function movieKey(movie: Movie) {
@@ -124,71 +146,113 @@ export default function Home() {
   const today = todayDateString();
   const maxDate = addDays(today, 29);
   const [zip, setZip] = useState('');
-  const [selectedDate, setSelectedDate] = useState(today);
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const startTimeRef = useRef(0);
-  const activeDateOffset = dateOptions.find(option => {
-    return selectedDate === addDays(today, option.offset);
-  })?.offset;
+  const prewarmedDatesRef = useRef<Set<string>>(new Set());
+  const days = daysBetweenInclusive(startDate, endDate);
+  const activeRangeDays = rangeOptions.find(option => {
+    return startDate === today && endDate === addDays(today, option.days - 1);
+  })?.days;
+  const endDateMax = addDays(startDate, Math.min(29, daysBetweenInclusive(startDate, maxDate) - 1));
 
-  function setPresetDate(offset: number) {
-    setSelectedDate(addDays(today, offset));
+  function setPresetRange(nextDays: number) {
+    setStartDate(today);
+    setEndDate(addDays(today, nextDays - 1));
   }
 
-  function updateSelectedDate(value: string) {
-    if (value < today) {
-      setSelectedDate(today);
-      return;
-    }
-    if (value > maxDate) {
-      setSelectedDate(maxDate);
-      return;
-    }
-    setSelectedDate(value);
+  function updateStartDate(value: string) {
+    const nextStart = value < today ? today : value > maxDate ? maxDate : value;
+    setStartDate(nextStart);
+    setEndDate(current => {
+      if (current < nextStart) return nextStart;
+      const nextMax = addDays(nextStart, Math.min(29, daysBetweenInclusive(nextStart, maxDate) - 1));
+      return current > nextMax ? nextMax : current;
+    });
+  }
+
+  function updateEndDate(value: string) {
+    const nextEnd = value < startDate ? startDate : value > endDateMax ? endDateMax : value;
+    setEndDate(nextEnd);
   }
 
   useEffect(() => {
     if (status !== 'loading') return;
     const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      setElapsed(Math.floor((currentTimeMs() - startTimeRef.current) / 1000));
     }, 1000);
     return () => clearInterval(id);
   }, [status]);
 
-  async function search() {
-    if (!/^\d{5}$/.test(zip)) {
+  useEffect(() => {
+    if (days > 7) return;
+    const prewarmKey = `${startDate}:${endDate}`;
+    if (prewarmedDatesRef.current.has(prewarmKey)) return;
+    prewarmedDatesRef.current.add(prewarmKey);
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      void (async () => {
+        for (const location of popularLocations) {
+          const params = new URLSearchParams({
+            zip: location.zip,
+            startDate,
+            endDate,
+            prewarm: '1',
+          });
+          try {
+            await fetch(`/api/movies?${params.toString()}`, {
+              signal: controller.signal,
+            });
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
+      })();
+    }, 1200);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [days, endDate, startDate]);
+
+  async function search(zipOverride = zip) {
+    const searchZip = zipOverride.trim();
+    if (!/^\d{5}$/.test(searchZip)) {
       setError('请输入 5 位美国邮编');
       setStatus('error');
       return;
     }
-    if (selectedDate < today || selectedDate > maxDate) {
-      setError('请选择今天起 30 天内的日期');
+    if (startDate < today || endDate < today || startDate > endDate || endDate > maxDate) {
+      setError('请选择今天起 30 天内的日期范围');
       setStatus('error');
       return;
     }
-    startTimeRef.current = Date.now();
+    startTimeRef.current = currentTimeMs();
     setElapsed(0);
     setStatus('loading');
     setError('');
     setExpandedMovies({});
     try {
-      const params = new URLSearchParams({ zip, date: selectedDate });
+      const params = new URLSearchParams({ zip: searchZip, startDate, endDate });
       const res = await fetch(`/api/movies?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'API error');
       setMovies(data);
-      const durationMs = Date.now() - startTimeRef.current;
+      const durationMs = currentTimeMs() - startTimeRef.current;
       setElapsed(Math.round(durationMs / 100) / 10);
       setStatus('done');
       trackMovieSearch({
-        zip,
-        days: 1,
-        startDate: selectedDate,
-        endDate: selectedDate,
+        zip: searchZip,
+        days,
+        startDate,
+        endDate,
         resultCount: Array.isArray(data) ? data.length : 0,
         durationMs,
         status: Array.isArray(data) && data.length > 0 ? 'success' : 'empty',
@@ -198,15 +262,20 @@ export default function Home() {
       setError(message);
       setStatus('error');
       trackMovieSearch({
-        zip,
-        days: 1,
-        startDate: selectedDate,
-        endDate: selectedDate,
-        durationMs: Date.now() - startTimeRef.current,
+        zip: searchZip,
+        days,
+        startDate,
+        endDate,
+        durationMs: currentTimeMs() - startTimeRef.current,
         status: 'error',
         error: message,
       });
     }
+  }
+
+  function selectPopularLocation(nextZip: string) {
+    setZip(nextZip);
+    void search(nextZip);
   }
 
   return (
@@ -223,17 +292,19 @@ export default function Home() {
             placeholder="例：94041"
             value={zip}
             onChange={e => setZip(e.target.value.replace(/\D/g, ''))}
-            onKeyDown={e => e.key === 'Enter' && search()}
+            onKeyDown={e => {
+              if (e.key === 'Enter') void search();
+            }}
             className="w-40 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:border-blue-500 text-center text-lg tracking-widest"
           />
           <div className="inline-flex rounded-lg border border-gray-700 bg-gray-900 p-1">
-            {dateOptions.map(option => (
+            {rangeOptions.map(option => (
               <button
-                key={option.offset}
+                key={option.days}
                 type="button"
-                onClick={() => setPresetDate(option.offset)}
+                onClick={() => setPresetRange(option.days)}
                 className={`h-9 min-w-16 px-3 rounded-md text-sm font-medium transition-colors ${
-                  activeDateOffset === option.offset
+                  activeRangeDays === option.days
                     ? 'bg-gray-100 text-gray-950'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800'
                 }`}
@@ -245,15 +316,24 @@ export default function Home() {
           <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1">
             <input
               type="date"
-              value={selectedDate}
+              value={startDate}
               min={today}
               max={maxDate}
-              onChange={e => updateSelectedDate(e.target.value)}
+              onChange={e => updateStartDate(e.target.value)}
+              className="h-8 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
+            />
+            <span className="text-xs text-gray-500">至</span>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate}
+              max={endDateMax}
+              onChange={e => updateEndDate(e.target.value)}
               className="h-8 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
             />
           </div>
           <button
-            onClick={search}
+            onClick={() => void search()}
             disabled={status === 'loading'}
             className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-semibold transition-colors"
           >
@@ -261,10 +341,32 @@ export default function Home() {
           </button>
         </div>
 
+        <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
+          {popularLocations.map(location => {
+            const selected = zip === location.zip;
+
+            return (
+              <button
+                key={location.zip}
+                type="button"
+                onClick={() => selectPopularLocation(location.zip)}
+                className={`rounded-md border px-3 py-1.5 text-left text-xs transition-colors ${
+                  selected
+                    ? 'border-blue-400 bg-blue-500/15 text-blue-100'
+                    : 'border-gray-800 bg-gray-900 text-gray-300 hover:border-gray-600 hover:text-white'
+                }`}
+              >
+                <span className="font-semibold">{location.label}</span>
+                <span className="ml-1 text-gray-500">{location.description}</span>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="h-6 flex items-center justify-center mb-7">
           {status === 'done' && (
             <span className="text-xs text-gray-500">
-              {movies.length > 0 ? `找到 ${movies.length} 部` : '无结果'} · {selectedDate} · 用时 {fmtTime(elapsed)}
+              {movies.length > 0 ? `找到 ${movies.length} 部` : '无结果'} · {dateRangeLabel(startDate, endDate)} · 用时 {fmtTime(elapsed)}
             </span>
           )}
         </div>
@@ -275,7 +377,7 @@ export default function Home() {
 
         {status === 'done' && movies.length === 0 && (
           <div className="text-center">
-            <p className="text-gray-500 mb-4">{zip} 附近 {selectedDate} 没有华语院线排片</p>
+            <p className="text-gray-500 mb-4">{zip} 附近 {dateRangeLabel(startDate, endDate)} 没有华语院线排片</p>
             <Link
               href={`/ai?q=${zip}`}
               className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"
@@ -290,7 +392,7 @@ export default function Home() {
             {movies.map((m, i) => {
               const key = movieKey(m);
               const expanded = Boolean(expandedMovies[key]);
-              const dateGroups = groupShowtimesByDate(m, selectedDate);
+              const dateGroups = groupShowtimesByDate(m, startDate);
               const showtimeCount = dateGroups.reduce((sum, group) => sum + group.showings.length, 0);
               const nextDateGroup = dateGroups[0];
               const nextShowing = nextDateGroup?.showings[0];
@@ -324,7 +426,7 @@ export default function Home() {
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-gray-300">
-                          {m.theaters.length} 家影院 · {showtimeCount} 场
+                          {dateGroups.length} 天 · {m.theaters.length} 家影院 · {showtimeCount} 场
                         </p>
                         {nextDateGroup && nextShowing && (
                           <p className="mt-1 truncate text-[11px] text-gray-500">
