@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  inferOriginalAudio,
   isAcceptedChineseMovie,
   isLikelyChineseMovie,
   pickBestTmdbResult,
@@ -167,5 +168,58 @@ describe('Chinese movie matching', () => {
 
     assert.equal(isLikelyChineseMovie(movie, tmdb), true);
     assert.equal(isAcceptedChineseMovie(movie, tmdb), false);
+  });
+
+  it('labels original audio from TMDB spoken languages', () => {
+    assert.equal(
+      inferOriginalAudio({}, {
+        original_language: 'zh',
+        spoken_languages: [{ iso_639_1: 'zh', english_name: 'Mandarin' }],
+      }),
+      '普通话'
+    );
+    assert.equal(
+      inferOriginalAudio({}, {
+        original_language: 'cn',
+        spoken_languages: [{ iso_639_1: 'cn', english_name: 'Cantonese' }],
+      }),
+      '粤语'
+    );
+    assert.equal(
+      inferOriginalAudio({}, {
+        original_language: 'en',
+        spoken_languages: [{ iso_639_1: 'en', english_name: 'English' }],
+      }),
+      '英语'
+    );
+  });
+
+  it('labels multi-language and unknown original audio conservatively', () => {
+    assert.equal(
+      inferOriginalAudio({}, {
+        original_language: 'zh',
+        spoken_languages: [
+          { iso_639_1: 'zh', english_name: 'Mandarin' },
+          { iso_639_1: 'en', english_name: 'English' },
+        ],
+      }),
+      '多语'
+    );
+    assert.equal(
+      inferOriginalAudio({}, {
+        original_language: 'ja',
+        spoken_languages: [{ iso_639_1: 'ja', english_name: 'Japanese' }],
+      }),
+      '未知'
+    );
+  });
+
+  it('uses TMS showtime qualifiers when TMDB language is missing', () => {
+    assert.equal(
+      inferOriginalAudio({
+        showtimes: [{ quals: 'Cantonese with English subtitles' }],
+      }, null),
+      '粤语'
+    );
   });
 });

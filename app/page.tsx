@@ -17,6 +17,7 @@ interface Movie {
   posterPath: string | null;
   overview: string;
   releaseDate: string;
+  originalAudio: '普通话' | '粤语' | '英语' | '多语' | '未知';
   theaters: Showtime[];
 }
 
@@ -311,6 +312,11 @@ export default function Home() {
                   {m.originalTitle && m.originalTitle !== m.title && (
                     <p className="text-gray-400 text-sm mt-0.5">{m.title}</p>
                   )}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="rounded border border-gray-700 bg-gray-950 px-2 py-0.5 text-[11px] text-gray-300">
+                      原声：{m.originalAudio ?? '未知'}
+                    </span>
+                  </div>
                   {m.overview && (
                     <p className="text-gray-500 text-xs mt-2 line-clamp-3">{m.overview}</p>
                   )}

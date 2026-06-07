@@ -3,6 +3,7 @@ import {
   isAcceptedChineseMovie,
   isLikelyChineseFromTms,
   isLikelyChineseSearchCandidate,
+  inferOriginalAudio,
   parseYear,
   pickBestTmdbResult,
 } from './movie-matching';
@@ -319,6 +320,7 @@ export async function GET(request) {
         : null,
       overview: m.tmdb?.overview ?? m.longDescription ?? '',
       releaseDate: m.tmdb?.release_date ?? String(m.releaseDate ?? m.releaseYear ?? ''),
+      originalAudio: inferOriginalAudio(m, m.tmdb),
       theaters: m.theaters,
     }));
 

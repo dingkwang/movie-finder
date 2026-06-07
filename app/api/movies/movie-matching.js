@@ -2,6 +2,13 @@ export const CHINESE_LANGS = new Set(['zh', 'cmn', 'yue', 'cn', 'zh-hans', 'zh-h
 export const CHINESE_COUNTRIES = new Set(['CN', 'HK', 'MO', 'SG', 'TW']);
 export const CHINESE_SHOWTIME_RE = /\b(cantonese|mandarin|chinese|putonghua|guangdonghua)\b/i;
 export const CJK_RE = /[\u3400-\u9fff]/;
+export const AUDIO_LABELS = {
+  mandarin: '普通话',
+  cantonese: '粤语',
+  english: '英语',
+  multi: '多语',
+  unknown: '未知',
+};
 
 export function normalizeTitle(title) {
   return (title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -25,6 +32,46 @@ export function parseYear(value) {
 
 export function isChineseLanguage(language) {
   return CHINESE_LANGS.has(language?.toLowerCase());
+}
+
+function audioCategoryFromLanguage(language) {
+  const normalized = language?.toLowerCase();
+  if (!normalized) return null;
+  if (['zh', 'cmn', 'zh-hans', 'zh-hant'].includes(normalized)) return 'mandarin';
+  if (['yue', 'cn'].includes(normalized)) return 'cantonese';
+  if (normalized === 'en') return 'english';
+  return null;
+}
+
+function audioCategoryFromName(name) {
+  if (/mandarin|putonghua/i.test(name ?? '')) return 'mandarin';
+  if (/cantonese|guangdonghua/i.test(name ?? '')) return 'cantonese';
+  if (/\benglish\b/i.test(name ?? '')) return 'english';
+  return null;
+}
+
+function addAudioCategory(categories, category) {
+  if (category) categories.add(category);
+}
+
+export function inferOriginalAudio(movie, tmdb) {
+  const categories = new Set();
+
+  for (const language of tmdb?.spoken_languages ?? []) {
+    addAudioCategory(categories, audioCategoryFromLanguage(language.iso_639_1));
+    addAudioCategory(categories, audioCategoryFromName(language.english_name));
+    addAudioCategory(categories, audioCategoryFromName(language.name));
+  }
+
+  addAudioCategory(categories, audioCategoryFromLanguage(tmdb?.original_language));
+
+  for (const showtime of movie?.showtimes ?? []) {
+    addAudioCategory(categories, audioCategoryFromName(showtime.quals));
+  }
+
+  if (categories.size > 1) return AUDIO_LABELS.multi;
+  const [category] = categories;
+  return AUDIO_LABELS[category] ?? AUDIO_LABELS.unknown;
 }
 
 export function isLikelyChineseFromTms(movie) {
