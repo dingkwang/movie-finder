@@ -22,6 +22,7 @@ interface Movie {
 }
 
 type AudioFilter = 'all' | Movie['originalAudio'];
+type RadiusMiles = 10 | 40 | 200;
 
 interface DateShowing {
   time: string;
@@ -144,9 +145,16 @@ const audioFilterOptions: { value: AudioFilter; label: string }[] = [
   { value: '未知', label: '未知' },
 ];
 
+const radiusOptions: { value: RadiusMiles; label: string }[] = [
+  { value: 10, label: '10 mile' },
+  { value: 40, label: '40 mile' },
+  { value: 200, label: '200 mile' },
+];
+
 const popularLocations = [
-  { label: '94041', description: '南湾', zip: '94041' },
+  { label: '旧金山南湾', description: '', zip: '94041' },
   { label: '旧金山', description: 'Chinatown', zip: '94133' },
+  { label: '洛杉矶', description: '好莱坞', zip: '90028' },
   { label: '法拉盛', description: 'Flushing', zip: '11354' },
   { label: '曼哈顿', description: 'Chinatown', zip: '10013' },
 ];
@@ -220,6 +228,7 @@ function groupShowtimesByDate(movie: Movie, selectedDate: string): ShowtimeDateG
 
 function trackMovieSearch(payload: {
   zip: string;
+  radius: RadiusMiles;
   days: number;
   startDate: string;
   endDate: string;
@@ -234,7 +243,6 @@ function trackMovieSearch(payload: {
     keepalive: true,
     body: JSON.stringify({
       eventType: 'movie_search',
-      radius: 40,
       ...payload,
     }),
   }).catch(() => {});
@@ -246,6 +254,7 @@ export default function Home() {
   const [zip, setZip] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [radius, setRadius] = useState<RadiusMiles>(40);
   const [audioFilter, setAudioFilter] = useState<AudioFilter>('all');
   const [movies, setMovies] = useState<Movie[]>([]);
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
@@ -265,7 +274,7 @@ export default function Home() {
     return startDate === today && endDate === addDays(today, option.days - 1);
   })?.days;
   const endDateMax = addDays(startDate, Math.min(29, daysBetweenInclusive(startDate, maxDate) - 1));
-  const filterSummary = `${dateRangeLabel(startDate, endDate)} · ${audioFilter === 'all' ? '所有中文' : audioFilter}`;
+  const filterSummary = `${dateRangeLabel(startDate, endDate)} · ${radius} mile · ${audioFilter === 'all' ? '所有中文' : audioFilter}`;
 
   function setPresetRange(nextDays: number) {
     setStartDate(today);
@@ -297,7 +306,8 @@ export default function Home() {
 
   useEffect(() => {
     if (days > 7) return;
-    const prewarmKey = `${startDate}:${endDate}`;
+    if (radius > 40) return;
+    const prewarmKey = `${startDate}:${endDate}:${radius}`;
     if (prewarmedDatesRef.current.has(prewarmKey)) return;
     prewarmedDatesRef.current.add(prewarmKey);
 
@@ -309,6 +319,7 @@ export default function Home() {
             zip: loc.zip,
             startDate,
             endDate,
+            radius: String(radius),
             prewarm: '1',
           });
           try {
@@ -326,7 +337,7 @@ export default function Home() {
       controller.abort();
       window.clearTimeout(timeout);
     };
-  }, [days, endDate, startDate]);
+  }, [days, endDate, radius, startDate]);
 
   async function search(zipOverride = zip) {
     const searchZip = zipOverride.trim();
@@ -346,7 +357,7 @@ export default function Home() {
     setError('');
     setExpandedMovies({});
     try {
-      const params = new URLSearchParams({ zip: searchZip, startDate, endDate });
+      const params = new URLSearchParams({ zip: searchZip, startDate, endDate, radius: String(radius) });
       const res = await fetch(`/api/movies?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'API error');
@@ -356,6 +367,7 @@ export default function Home() {
       setStatus('done');
       trackMovieSearch({
         zip: searchZip,
+        radius,
         days,
         startDate,
         endDate,
@@ -369,6 +381,7 @@ export default function Home() {
       setStatus('error');
       trackMovieSearch({
         zip: searchZip,
+        radius,
         days,
         startDate,
         endDate,
@@ -420,7 +433,7 @@ export default function Home() {
           className="mx-auto mb-4 min-w-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900/70 p-3"
           style={{ width: 'calc(100vw - 2rem)', maxWidth: '48rem' }}
         >
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_6rem]">
+          <div className="grid grid-cols-[minmax(0,1fr)_8rem] gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_6rem]">
             <div className="relative flex-1">
               <label htmlFor="zip-input" className="sr-only">邮编</label>
               <input
@@ -448,10 +461,23 @@ export default function Home() {
               </button>
             </div>
 
+            <label className="sr-only" htmlFor="radius-filter">范围</label>
+            <select
+              id="radius-filter"
+              value={radius}
+              onChange={e => setRadius(Number(e.target.value) as RadiusMiles)}
+              className="h-11 rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm text-gray-200 outline-none [color-scheme:dark] focus:border-blue-500"
+            >
+              {radiusOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <button
               onClick={() => void search()}
               disabled={status === 'loading'}
-              className="h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50 sm:w-24 sm:shrink-0"
+              className="col-span-2 h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50 sm:col-span-1 sm:w-24 sm:shrink-0"
             >
               {status === 'loading' ? fmtTime(elapsed) : '搜索'}
             </button>
@@ -473,7 +499,7 @@ export default function Home() {
                   }`}
                 >
                   <span className="font-semibold">{loc.label}</span>
-                  <span className="ml-1 text-gray-500">{loc.description}</span>
+                  {loc.description && <span className="ml-1 text-gray-500">{loc.description}</span>}
                 </button>
               );
             })}
