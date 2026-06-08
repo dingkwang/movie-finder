@@ -1,6 +1,9 @@
 const CENSUS_GEOCODER_BASE = 'https://geocoding.geo.census.gov/geocoder/geographies/coordinates';
 const CENSUS_LOOKUP_TIMEOUT_MS = 8000;
-const CENSUS_LAYERS = 'ZIP Code Tabulation Areas,Incorporated Places,County Subdivisions,States';
+// Use 'all' rather than naming layers: the ZCTA layer key is vintage-prefixed
+// (e.g. "2020 Census ZIP Code Tabulation Areas"), so a hard-coded layer name
+// silently drops the ZIP and breaks lookups when the census year changes.
+const CENSUS_LAYERS = 'all';
 
 export const maxDuration = 10;
 
