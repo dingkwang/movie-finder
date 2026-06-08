@@ -326,6 +326,12 @@ export async function GET(request) {
   const includeShowtimeDate = days > 1 || startDate !== todayDateString();
 
   try {
+    // Rate limiting only covers requests that reach this function. Successful
+    // responses are sent with `s-maxage` (see successCacheHeaders), so the CDN
+    // serves repeats of an identical URL from the edge without invoking this
+    // handler — those never increment a bucket. That is intentional: a CDN hit
+    // costs no TMS/TMDB calls, so it needs no limiting. The limiter guards the
+    // CDN-miss traffic (varied zip/date/radius), which is what actually spends.
     const rateLimit = await checkRateLimit({
       request,
       endpoint: 'movies',
