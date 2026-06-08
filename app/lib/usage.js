@@ -218,6 +218,8 @@ export async function getUsageDashboardData() {
         count(*) filter (where event_type = 'movie_search' and created_at >= now() - interval '1 day')::int as searches_today,
         count(distinct ip_hash) filter (where created_at >= now() - interval '7 days')::int as unique_users_7d,
         count(*) filter (where event_type = 'movie_search' and status = 'empty')::int as empty_searches,
+        count(*) filter (where status = 'rate_limited')::int as rate_limited_events,
+        count(*) filter (where status = 'rate_limited' and created_at >= now() - interval '1 day')::int as rate_limited_events_today,
         count(*) filter (where status = 'error')::int as error_events,
         round(avg(duration_ms) filter (where duration_ms is not null))::int as avg_duration_ms,
         coalesce(sum(tms_request_count), 0)::int as tms_requests,
@@ -346,7 +348,7 @@ export async function getUsageDashboardData() {
         status,
         error
       from usage_events
-      where status = 'error' or error is not null
+      where status in ('error', 'rate_limited') or error is not null
       order by created_at desc
       limit 20
     `,

@@ -12,6 +12,8 @@ interface Totals {
   searches_today: number;
   unique_users_7d: number;
   empty_searches: number;
+  rate_limited_events: number;
+  rate_limited_events_today: number;
   error_events: number;
   avg_duration_ms: number | null;
   tms_requests: number;
@@ -281,6 +283,8 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
           <MetricCard label="30 天 TMDB fetches" value={formatNumber(totals.tmdb_requests)} hint={`平均 ${formatDecimal(totals.avg_tmdb_requests)} / backend miss`} />
           <MetricCard label="今天事件" value={formatNumber(totals.events_today)} />
           <MetricCard label="30 天事件" value={formatNumber(totals.total_events)} />
+          <MetricCard label="今天限流" value={formatNumber(totals.rate_limited_events_today)} />
+          <MetricCard label="30 天限流" value={formatNumber(totals.rate_limited_events)} />
           <MetricCard label="平均耗时" value={formatDuration(totals.avg_duration_ms)} />
           <MetricCard label="错误事件" value={formatNumber(totals.error_events)} />
         </div>
