@@ -67,73 +67,15 @@ Local: `.env.local` (gitignored). Production: Vercel dashboard → Settings → 
 
 Push to `main` → Vercel auto-deploys when the Git integration is active. Manual production deploys use `vercel deploy --prod` only after local validation passes.
 
-## Vercel Deployment Rules
-
-- Do not commit `.env`, `.env.local`, `.env.production.local`, API keys, tokens, database URLs, admin passwords, or credentials.
-- Do not expose secrets through `NEXT_PUBLIC_*`.
-- Separate Production, Preview, and Development environment variables in Vercel.
-- Preview deployments must not use production databases or production-only credentials unless the user explicitly approves it.
-- Treat Preview deployments as externally reachable. Do not add public debug endpoints, token dumps, internal data views, or unauthenticated admin tools.
-- Do not change `vercel.json`, build commands, output directory, root directory, Node.js version, function timeout, function memory, or region unless the task explicitly requires it.
-- If changing environment variable names, update docs and mention the required Vercel Project Settings changes.
-- Before production deploys, run `npm run lint`, `npm test`, and `npm run build`.
-
-## Next.js / React Rules
-
-- Read the relevant Next.js 16 docs under `node_modules/next/dist/docs/` before writing Next-specific code.
-- Prefer Server Components by default.
-- Add `"use client"` only when browser APIs, local state, effects, refs, or event handlers are required.
-- Avoid client-side data fetching when server-side fetching is sufficient.
-- Avoid unnecessary global providers that increase client bundle size.
-- Use `next/image` or explicit image dimensions to avoid layout shift.
-- Do not introduce large dependencies without explaining bundle impact.
-- Use dynamic imports for heavy client-only components when appropriate.
-
-## API / Server Rules
-
-- Validate all external input at route boundaries.
-- Return JSON responses with clear status codes.
-- Handle errors without leaking secrets, stack traces, raw provider payloads, or credentials to users.
-- Add rate limiting or abuse protection for public mutation endpoints when risk increases.
-- Avoid long-running synchronous work in request handlers.
-- Use bounded concurrency for external provider calls.
-- Use caching, ISR, cache tags, or background work where appropriate.
-
-## Middleware Rules
-
-- Avoid middleware unless necessary.
-- Middleware must be minimal, fast, and side-effect free.
-- Do not perform expensive DB queries, TMS calls, TMDB calls, AI calls, or other external API calls from middleware.
-
-## Caching Rules
-
-- Be explicit about caching behavior.
-- For static or semi-static data, prefer `revalidate`, cache tags, or ISR.
-- For user-specific/private/admin data, ensure responses are not publicly cached.
-- When changing caching behavior, explain correctness and invalidation strategy.
-- For this app, standard showtime search should normally cache by `zip + date` or range for 6-12 hours, and TMDB enrichment should normally cache for 7-30 days.
-
 ## Known limitations
 
 - TMS only has current/upcoming showtimes — no historical data
 - Hobby tier Vercel function timeout: 10 s. Parallel TMDB calls keep this well under budget for typical zip codes (~50 movies × fast fetch)
 - TMDB title search can misidentify films with common English titles; filter may produce false negatives for Chinese films with unusual English-only titles
 
-## Optional Agent Skills
+## Shared Guidance
 
-Vercel agent skills are installed under `.agents/skills`. Use them as references for specialized work after first inspecting the relevant project files:
-
-- For deployment or preview URL tasks, use `deploy-to-vercel`.
-- For Vercel CLI token workflows, use `vercel-cli-with-tokens`.
-- For cost, performance, caching, reliability, or billing investigations, use `vercel-optimize`.
-- For React or Next.js code review, use `vercel-react-best-practices`.
-- For React Native or iPhone app planning, use `vercel-react-native-skills`.
-- For advanced React transitions, use `vercel-react-view-transitions`.
-- For UI/accessibility review, use `web-design-guidelines`.
-- For docs/prose review, use `writing-guidelines`.
-- For composition patterns in Vercel apps, use `vercel-composition-patterns`.
-
-Do not rely on skills to replace persistent project context. Treat this file as the source of durable project rules.
+The repo-specific instructions are here. Shared Vercel / agent guidance lives in `~/.agent/AGENTS.md`, and the installed Vercel skills live in `~/.agent/skills`.
 
 # Coding Principles
 
