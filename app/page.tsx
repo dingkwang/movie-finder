@@ -21,6 +21,8 @@ interface Movie {
   theaters: Showtime[];
 }
 
+type AudioFilter = 'all' | Movie['originalAudio'];
+
 interface DateShowing {
   time: string;
   theater: string;
@@ -133,6 +135,15 @@ const rangeOptions = [
   { days: 30, label: '30 天内' },
 ];
 
+const audioFilterOptions: { value: AudioFilter; label: string }[] = [
+  { value: 'all', label: '所有中文' },
+  { value: '普通话', label: '普通话' },
+  { value: '粤语', label: '粤语' },
+  { value: '英语', label: '英语' },
+  { value: '多语', label: '多语' },
+  { value: '未知', label: '未知' },
+];
+
 const popularLocations = [
   { label: '94041', description: '南湾', zip: '94041' },
   { label: '旧金山', description: 'Chinatown', zip: '94133' },
@@ -235,6 +246,7 @@ export default function Home() {
   const [zip, setZip] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [audioFilter, setAudioFilter] = useState<AudioFilter>('all');
   const [movies, setMovies] = useState<Movie[]>([]);
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
@@ -246,10 +258,14 @@ export default function Home() {
   const prewarmedDatesRef = useRef<Set<string>>(new Set());
   const days = daysBetweenInclusive(startDate, endDate);
   const isLocating = location.status === 'requesting' || location.status === 'resolving';
+  const filteredMovies = audioFilter === 'all'
+    ? movies
+    : movies.filter(movie => movie.originalAudio === audioFilter);
   const activeRangeDays = rangeOptions.find(option => {
     return startDate === today && endDate === addDays(today, option.days - 1);
   })?.days;
   const endDateMax = addDays(startDate, Math.min(29, daysBetweenInclusive(startDate, maxDate) - 1));
+  const filterSummary = `${dateRangeLabel(startDate, endDate)} · ${audioFilter === 'all' ? '所有中文' : audioFilter}`;
 
   function setPresetRange(nextDays: number) {
     setStartDate(today);
@@ -400,92 +416,122 @@ export default function Home() {
         <h1 className="text-3xl font-bold mb-2 text-center">🎬 附近华语院线</h1>
         <p className="text-gray-400 text-center mb-8 text-sm">输入邮编，查找附近已有排片的华语电影</p>
 
-        <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-3">
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={5}
-            placeholder="例：94041"
-            value={zip}
-            onChange={e => setZip(e.target.value.replace(/\D/g, ''))}
-            onKeyDown={e => {
-              if (e.key === 'Enter') void search();
-            }}
-            className="w-40 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:border-blue-500 text-center text-lg tracking-widest"
-          />
-          <div className="inline-flex rounded-lg border border-gray-700 bg-gray-900 p-1">
-            {rangeOptions.map(option => (
+        <section
+          className="mx-auto mb-4 min-w-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900/70 p-3"
+          style={{ width: 'calc(100vw - 2rem)', maxWidth: '48rem' }}
+        >
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_6rem]">
+            <div className="relative flex-1">
+              <label htmlFor="zip-input" className="sr-only">邮编</label>
+              <input
+                id="zip-input"
+                type="text"
+                inputMode="numeric"
+                maxLength={5}
+                placeholder="例：94041"
+                value={zip}
+                onChange={e => setZip(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') void search();
+                }}
+                className="h-11 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 pr-12 text-center text-lg text-white outline-none transition-colors focus:border-blue-500"
+              />
               <button
-                key={option.days}
                 type="button"
-                onClick={() => setPresetRange(option.days)}
-                className={`h-9 min-w-16 px-3 rounded-md text-sm font-medium transition-colors ${
-                  activeRangeDays === option.days
-                    ? 'bg-gray-100 text-gray-950'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
+                aria-label="使用当前位置"
+                title="使用当前位置"
+                onClick={detectCurrentLocation}
+                disabled={isLocating || status === 'loading'}
+                className="absolute right-1.5 top-1.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-white disabled:opacity-50"
               >
-                {option.label}
+                {isLocating ? '…' : '⌖'}
               </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1">
-            <input
-              type="date"
-              value={startDate}
-              min={today}
-              max={maxDate}
-              onChange={e => updateStartDate(e.target.value)}
-              className="h-8 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
-            />
-            <span className="text-xs text-gray-500">至</span>
-            <input
-              type="date"
-              value={endDate}
-              min={startDate}
-              max={endDateMax}
-              onChange={e => updateEndDate(e.target.value)}
-              className="h-8 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
-            />
-          </div>
-          <button
-            onClick={() => void search()}
-            disabled={status === 'loading'}
-            className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-semibold transition-colors"
-          >
-            {status === 'loading' ? `查询中… ${fmtTime(elapsed)}` : '搜索'}
-          </button>
-          <button
-            type="button"
-            onClick={detectCurrentLocation}
-            disabled={isLocating || status === 'loading'}
-            className="px-4 py-2 rounded-lg border border-gray-700 bg-gray-900 text-sm font-semibold text-gray-200 hover:border-gray-500 hover:text-white disabled:opacity-50 transition-colors"
-          >
-            {isLocating ? '定位中…' : '当前位置'}
-          </button>
-        </div>
+            </div>
 
-        <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
-          {popularLocations.map(loc => {
-            const selected = zip === loc.zip;
+            <button
+              onClick={() => void search()}
+              disabled={status === 'loading'}
+              className="h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50 sm:w-24 sm:shrink-0"
+            >
+              {status === 'loading' ? fmtTime(elapsed) : '搜索'}
+            </button>
+          </div>
 
-            return (
-              <button
-                key={loc.zip}
-                type="button"
-                onClick={() => selectPopularLocation(loc.zip)}
-                className={`rounded-md border px-3 py-1.5 text-left text-xs transition-colors ${
-                  selected
-                    ? 'border-blue-400 bg-blue-500/15 text-blue-100'
-                    : 'border-gray-800 bg-gray-900 text-gray-300 hover:border-gray-600 hover:text-white'
-                }`}
-              >
-                <span className="font-semibold">{loc.label}</span>
-                <span className="ml-1 text-gray-500">{loc.description}</span>
-              </button>
-            );
-          })}
-        </div>
+          <div className="mt-2 flex min-w-0 gap-2 overflow-x-auto pb-1">
+            {popularLocations.map(loc => {
+              const selected = zip === loc.zip;
+
+              return (
+                <button
+                  key={loc.zip}
+                  type="button"
+                  onClick={() => selectPopularLocation(loc.zip)}
+                  className={`shrink-0 rounded-md border px-3 py-1.5 text-left text-xs transition-colors ${
+                    selected
+                      ? 'border-blue-400 bg-blue-500/15 text-blue-100'
+                      : 'border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-600 hover:text-white'
+                  }`}
+                >
+                  <span className="font-semibold">{loc.label}</span>
+                  <span className="ml-1 text-gray-500">{loc.description}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 grid gap-2 border-t border-gray-800 pt-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+            <div className="rounded-lg border border-gray-700 bg-gray-950 p-1.5 sm:flex sm:items-center sm:gap-2">
+              <div className="flex gap-1">
+                {rangeOptions.map(option => (
+                  <button
+                    key={option.days}
+                    type="button"
+                    onClick={() => setPresetRange(option.days)}
+                    className={`h-9 min-w-16 rounded-md px-3 text-sm font-medium transition-colors ${
+                      activeRangeDays === option.days
+                        ? 'bg-gray-100 text-gray-950'
+                        : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1.5 flex items-center gap-2 rounded-md border border-gray-800 bg-gray-900 px-2 py-1 sm:mt-0 sm:flex-1">
+                <input
+                  type="date"
+                  value={startDate}
+                  min={today}
+                  max={maxDate}
+                  onChange={e => updateStartDate(e.target.value)}
+                  className="h-8 min-w-0 flex-1 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
+                />
+                <span className="text-xs text-gray-500">至</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  min={startDate}
+                  max={endDateMax}
+                  onChange={e => updateEndDate(e.target.value)}
+                  className="h-8 min-w-0 flex-1 bg-transparent text-sm text-gray-200 outline-none [color-scheme:dark]"
+                />
+              </div>
+            </div>
+            <label className="sr-only" htmlFor="audio-filter">语言</label>
+            <select
+              id="audio-filter"
+              value={audioFilter}
+              onChange={e => setAudioFilter(e.target.value as AudioFilter)}
+              className="h-11 rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm text-gray-200 outline-none [color-scheme:dark] focus:border-blue-500"
+            >
+              {audioFilterOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
 
         {location.message && (
           <p
@@ -501,7 +547,7 @@ export default function Home() {
         <div className="h-6 flex items-center justify-center mb-7">
           {status === 'done' && (
             <span className="text-xs text-gray-500">
-              {movies.length > 0 ? `找到 ${movies.length} 部` : '无结果'} · {dateRangeLabel(startDate, endDate)} · 用时 {fmtTime(elapsed)}
+              {filteredMovies.length > 0 ? `找到 ${filteredMovies.length} 部` : '无结果'} · {filterSummary} · 用时 {fmtTime(elapsed)}
             </span>
           )}
         </div>
@@ -510,9 +556,9 @@ export default function Home() {
           <p className="text-red-400 text-center mb-6">{error}</p>
         )}
 
-        {status === 'done' && movies.length === 0 && (
+        {status === 'done' && filteredMovies.length === 0 && (
           <div className="text-center">
-            <p className="text-gray-500 mb-4">{zip} 附近 {dateRangeLabel(startDate, endDate)} 没有华语院线排片</p>
+            <p className="text-gray-500 mb-4">{zip} 附近 {filterSummary} 没有华语院线排片</p>
             <Link
               href={`/ai?q=${zip}`}
               className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"
@@ -522,9 +568,9 @@ export default function Home() {
           </div>
         )}
 
-        {status === 'done' && movies.length > 0 && (
+        {status === 'done' && filteredMovies.length > 0 && (
           <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {movies.map((m, i) => {
+            {filteredMovies.map((m, i) => {
               const key = movieKey(m);
               const expanded = Boolean(expandedMovies[key]);
               const dateGroups = groupShowtimesByDate(m, startDate);
