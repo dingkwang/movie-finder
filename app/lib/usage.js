@@ -1,7 +1,7 @@
 import postgres from 'postgres';
 import { createHash } from 'crypto';
 
-const DEFAULT_RADIUS_MILES = 40;
+const DEFAULT_RADIUS_MILES = 50;
 const USAGE_TABLE = 'usage_events';
 
 let client;

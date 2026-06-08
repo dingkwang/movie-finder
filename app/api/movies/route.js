@@ -13,7 +13,8 @@ const DEFAULT_RANGE_DAYS = 1;
 const MAX_RANGE_DAYS = 30;
 const APP_TIME_ZONE = 'America/Los_Angeles';
 const TMDB_DETAIL_CANDIDATE_LIMIT = 8;
-const SEARCH_RADIUS_MILES = 40;
+const SEARCH_RADIUS_OPTIONS = new Set([10, 50, 200]);
+const DEFAULT_SEARCH_RADIUS_MILES = 50;
 const TMS_BASE = 'https://data.tmsapi.com/v1.1';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_LOOKUP_CONCURRENCY = 4;
@@ -115,6 +116,14 @@ function parseSearchRange(searchParams) {
   return { startDate, endDate, days, dates: dateRange(startDate, endDate) };
 }
 
+function parseSearchRadius(searchParams) {
+  const requestedRadius = Number(searchParams.get('radius') ?? DEFAULT_SEARCH_RADIUS_MILES);
+  if (!Number.isInteger(requestedRadius) || !SEARCH_RADIUS_OPTIONS.has(requestedRadius)) {
+    throw new Error('搜索范围必须是 10、50 或 200 mile');
+  }
+  return requestedRadius;
+}
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -169,14 +178,14 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
-async function getShowtimesForDate(zip, date, metrics) {
+async function getShowtimesForDate(zip, date, radius, metrics) {
   if (!process.env.TMS_API_KEY) throw new Error('TMS_API_KEY not configured');
-  const url = `${TMS_BASE}/movies/showings?startDate=${date}&zip=${zip}&radius=${SEARCH_RADIUS_MILES}&api_key=${process.env.TMS_API_KEY}`;
+  const url = `${TMS_BASE}/movies/showings?startDate=${date}&zip=${zip}&radius=${radius}&api_key=${process.env.TMS_API_KEY}`;
   metrics.tmsRequestCount++;
   const res = await fetch(url, {
     next: {
       revalidate: STANDARD_SEARCH_CACHE_SECONDS,
-      tags: [`tms-showtimes-${zip}-${date}`],
+      tags: [`tms-showtimes-${zip}-${date}-${radius}`],
     },
   });
   if (!res.ok) throw new Error(`TMS error ${res.status}`);
@@ -185,12 +194,12 @@ async function getShowtimesForDate(zip, date, metrics) {
   return JSON.parse(text);
 }
 
-async function getShowtimes(zip, date, metrics) {
+async function getShowtimes(zip, date, radius, metrics) {
   if (Array.isArray(date)) {
-    const batches = await Promise.all(date.map(item => getShowtimesForDate(zip, item, metrics)));
+    const batches = await Promise.all(date.map(item => getShowtimesForDate(zip, item, radius, metrics)));
     return batches.flat();
   }
-  return getShowtimesForDate(zip, date, metrics);
+  return getShowtimesForDate(zip, date, radius, metrics);
 }
 
 async function tmdbSearch(title, year, metrics) {
@@ -280,8 +289,10 @@ export async function GET(request) {
     return Response.json({ error: 'Valid 5-digit zip required' }, { status: 400 });
   }
   let range;
+  let radius;
   try {
     range = parseSearchRange(request.nextUrl.searchParams);
+    radius = parseSearchRadius(request.nextUrl.searchParams);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 400 });
   }
@@ -289,7 +300,7 @@ export async function GET(request) {
   const includeShowtimeDate = days > 1 || startDate !== todayDateString();
 
   try {
-    const showings = mergeShowings(await getShowtimes(zip, dates, metrics));
+    const showings = mergeShowings(await getShowtimes(zip, dates, radius, metrics));
 
     // TMS returns one entry per movie with nested showtimes[]
     const movies = showings.map(m => {
@@ -360,7 +371,7 @@ export async function GET(request) {
         days,
         startDate,
         endDate,
-        radius: SEARCH_RADIUS_MILES,
+        radius,
         resultCount: result.length,
         durationMs: Date.now() - startedAt,
         tmsRequestCount: metrics.tmsRequestCount,
@@ -381,7 +392,7 @@ export async function GET(request) {
         days,
         startDate,
         endDate,
-        radius: SEARCH_RADIUS_MILES,
+        radius,
         durationMs: Date.now() - startedAt,
         tmsRequestCount: metrics.tmsRequestCount,
         tmdbSearchCount: metrics.tmdbSearchCount,
