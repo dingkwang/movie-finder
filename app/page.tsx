@@ -264,7 +264,6 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0);
   const startTimeRef = useRef(0);
   const locationRequestIdRef = useRef(0);
-  const prewarmedDatesRef = useRef<Set<string>>(new Set());
   const days = daysBetweenInclusive(startDate, endDate);
   const isLocating = location.status === 'requesting' || location.status === 'resolving';
   const filteredMovies = audioFilter === 'all'
@@ -303,41 +302,6 @@ export default function Home() {
     }, 1000);
     return () => clearInterval(id);
   }, [status]);
-
-  useEffect(() => {
-    if (days > 7) return;
-    if (radius > 40) return;
-    const prewarmKey = `${startDate}:${endDate}:${radius}`;
-    if (prewarmedDatesRef.current.has(prewarmKey)) return;
-    prewarmedDatesRef.current.add(prewarmKey);
-
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      void (async () => {
-        for (const loc of popularLocations) {
-          const params = new URLSearchParams({
-            zip: loc.zip,
-            startDate,
-            endDate,
-            radius: String(radius),
-            prewarm: '1',
-          });
-          try {
-            await fetch(`/api/movies?${params.toString()}`, {
-              signal: controller.signal,
-            });
-          } catch {
-            if (controller.signal.aborted) return;
-          }
-        }
-      })();
-    }, 1200);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timeout);
-    };
-  }, [days, endDate, radius, startDate]);
 
   async function search(zipOverride = zip) {
     const searchZip = zipOverride.trim();
