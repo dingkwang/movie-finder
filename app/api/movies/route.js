@@ -119,7 +119,7 @@ function parseSearchRange(searchParams) {
 function parseSearchRadius(searchParams) {
   const requestedRadius = Number(searchParams.get('radius') ?? DEFAULT_SEARCH_RADIUS_MILES);
   if (!Number.isInteger(requestedRadius) || !SEARCH_RADIUS_OPTIONS.has(requestedRadius)) {
-    throw new Error('搜索范围必须是 10、50 或 200 mile');
+    throw new Error('搜索范围必须是 10、40 或 200 mile');
   }
   return requestedRadius;
 }

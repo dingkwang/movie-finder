@@ -152,8 +152,9 @@ const radiusOptions: { value: RadiusMiles; label: string }[] = [
 ];
 
 const popularLocations = [
-  { label: '旧金山湾区', description: '', zip: '94041' },
+  { label: '旧金山南湾', description: '', zip: '94041' },
   { label: '旧金山', description: 'Chinatown', zip: '94133' },
+  { label: '洛杉矶', description: '好莱坞', zip: '90028' },
   { label: '法拉盛', description: 'Flushing', zip: '11354' },
   { label: '曼哈顿', description: 'Chinatown', zip: '10013' },
 ];
@@ -432,7 +433,7 @@ export default function Home() {
           className="mx-auto mb-4 min-w-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900/70 p-3"
           style={{ width: 'calc(100vw - 2rem)', maxWidth: '48rem' }}
         >
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_6rem]">
+          <div className="grid grid-cols-[minmax(0,1fr)_8rem] gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_6rem]">
             <div className="relative flex-1">
               <label htmlFor="zip-input" className="sr-only">邮编</label>
               <input
@@ -460,10 +461,23 @@ export default function Home() {
               </button>
             </div>
 
+            <label className="sr-only" htmlFor="radius-filter">范围</label>
+            <select
+              id="radius-filter"
+              value={radius}
+              onChange={e => setRadius(Number(e.target.value) as RadiusMiles)}
+              className="h-11 rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm text-gray-200 outline-none [color-scheme:dark] focus:border-blue-500"
+            >
+              {radiusOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <button
               onClick={() => void search()}
               disabled={status === 'loading'}
-              className="h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50 sm:w-24 sm:shrink-0"
+              className="col-span-2 h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50 sm:col-span-1 sm:w-24 sm:shrink-0"
             >
               {status === 'loading' ? fmtTime(elapsed) : '搜索'}
             </button>
@@ -491,7 +505,7 @@ export default function Home() {
             })}
           </div>
 
-          <div className="mt-3 grid gap-2 border-t border-gray-800 pt-3 sm:grid-cols-[minmax(0,1fr)_9rem_12rem]">
+          <div className="mt-3 grid gap-2 border-t border-gray-800 pt-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
             <div className="rounded-lg border border-gray-700 bg-gray-950 p-1.5 sm:flex sm:items-center sm:gap-2">
               <div className="flex gap-1">
                 {rangeOptions.map(option => (
@@ -529,19 +543,6 @@ export default function Home() {
                 />
               </div>
             </div>
-            <label className="sr-only" htmlFor="radius-filter">范围</label>
-            <select
-              id="radius-filter"
-              value={radius}
-              onChange={e => setRadius(Number(e.target.value) as RadiusMiles)}
-              className="h-11 rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm text-gray-200 outline-none [color-scheme:dark] focus:border-blue-500"
-            >
-              {radiusOptions.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
             <label className="sr-only" htmlFor="audio-filter">语言</label>
             <select
               id="audio-filter"
