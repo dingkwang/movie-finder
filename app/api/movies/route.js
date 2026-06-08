@@ -7,6 +7,7 @@ import {
   parseYear,
   pickBestTmdbResult,
 } from './movie-matching';
+import { checkRateLimit, rateLimitHeaders } from '../../lib/rate-limit';
 import { recordUsageEvent } from '../../lib/usage';
 
 const DEFAULT_RANGE_DAYS = 1;
@@ -21,6 +22,8 @@ const TMDB_LOOKUP_CONCURRENCY = 4;
 const STANDARD_SEARCH_CACHE_SECONDS = 60 * 60 * 6;
 const STANDARD_SEARCH_STALE_SECONDS = 60 * 60 * 12;
 const TMDB_CACHE_SECONDS = 60 * 60 * 24 * 30;
+const TMS_FETCH_TIMEOUT_MS = 10_000;
+const TMDB_FETCH_TIMEOUT_MS = 8_000;
 
 export const maxDuration = 30;
 
@@ -145,16 +148,39 @@ function successCacheHeaders() {
   };
 }
 
+async function fetchWithTimeout(url, options, timeoutMs, label) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`${label} timeout`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchTmdbJson(url, metrics, requestType) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (requestType === 'search') metrics.tmdbSearchCount++;
     if (requestType === 'detail') metrics.tmdbDetailCount++;
-    const res = await fetch(url, {
-      next: {
-        revalidate: TMDB_CACHE_SECONDS,
-        tags: ['tmdb-movies'],
-      },
-    });
+    let res;
+    try {
+      res = await fetchWithTimeout(url, {
+        next: {
+          revalidate: TMDB_CACHE_SECONDS,
+          tags: ['tmdb-movies'],
+        },
+      }, TMDB_FETCH_TIMEOUT_MS, 'TMDB');
+    } catch {
+      return null;
+    }
     if (res.ok) return res.json();
     if (res.status !== 429 || attempt === 2) return null;
     await wait(500 * (attempt + 1));
@@ -182,12 +208,12 @@ async function getShowtimesForDate(zip, date, radius, metrics) {
   if (!process.env.TMS_API_KEY) throw new Error('TMS_API_KEY not configured');
   const url = `${TMS_BASE}/movies/showings?startDate=${date}&zip=${zip}&radius=${radius}&api_key=${process.env.TMS_API_KEY}`;
   metrics.tmsRequestCount++;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     next: {
       revalidate: STANDARD_SEARCH_CACHE_SECONDS,
       tags: [`tms-showtimes-${zip}-${date}-${radius}`],
     },
-  });
+  }, TMS_FETCH_TIMEOUT_MS, 'TMS');
   if (!res.ok) throw new Error(`TMS error ${res.status}`);
   const text = await res.text();
   if (!text.trim()) return [];
@@ -300,6 +326,37 @@ export async function GET(request) {
   const includeShowtimeDate = days > 1 || startDate !== todayDateString();
 
   try {
+    const rateLimit = await checkRateLimit({
+      request,
+      endpoint: 'movies',
+      zip,
+      days,
+      radius,
+    });
+    if (rateLimit.limited) {
+      if (shouldRecordUsage) {
+        await recordUsageEvent({
+          eventType: 'movie_search_backend',
+          zip,
+          days,
+          startDate,
+          endDate,
+          radius,
+          durationMs: Date.now() - startedAt,
+          tmsRequestCount: 0,
+          tmdbSearchCount: 0,
+          tmdbDetailCount: 0,
+          tmdbRequestCount: 0,
+          status: 'rate_limited',
+          error: rateLimit.reason,
+        }, request);
+      }
+      return Response.json(
+        { error: '请求太频繁，请稍后再试。' },
+        { status: 429, headers: rateLimitHeaders(rateLimit) }
+      );
+    }
+
     const showings = mergeShowings(await getShowtimes(zip, dates, radius, metrics));
 
     // TMS returns one entry per movie with nested showtimes[]
