@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { requestMetadata } from './usage';
 
 const RATE_LIMIT_TABLE = 'rate_limit_buckets';
@@ -60,12 +60,16 @@ async function ensureRateLimitTable() {
   return db;
 }
 
+// Generated once per process. Used only when no salt is configured, so the IP
+// hash is never derived from a source-visible constant or an auth secret. The
+// trade-off is that without a real salt, IP buckets are not shared across
+// instances — rate limiting degrades looser, never leaking a reversible hash.
+const FALLBACK_SALT = randomBytes(16).toString('hex');
+
 function anonymousHash(value) {
   const salt = process.env.RATE_LIMIT_SALT
     ?? process.env.USAGE_IP_SALT
-    ?? process.env.ADMIN_PASSWORD
-    ?? process.env.ADMIN_TOKEN
-    ?? 'movie-finder-rate-limit';
+    ?? FALLBACK_SALT;
   return createHash('sha256').update(`${value || 'unknown'}:${salt}`).digest('hex');
 }
 
