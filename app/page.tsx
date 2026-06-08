@@ -32,12 +32,99 @@ interface ShowtimeDateGroup {
   showings: DateShowing[];
 }
 
+interface DetectedLocation {
+  zip: string;
+  city: string | null;
+  state: string | null;
+}
+
+type LocationStatus = 'idle' | 'requesting' | 'resolving' | 'done' | 'error';
+
+interface LocationState {
+  status: LocationStatus;
+  message: string;
+}
+
 function fmtTime(s: number) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 function currentTimeMs() {
   return Date.now();
+}
+
+const locationLookupTimeoutMs = 9000;
+
+function isGeolocationPositionError(error: unknown): error is GeolocationPositionError {
+  return error instanceof GeolocationPositionError;
+}
+
+function isAbortError(error: unknown) {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+function locationErrorMessage(error: unknown) {
+  if (isAbortError(error)) return '定位服务超时，请手动输入邮编';
+  if (!isGeolocationPositionError(error)) {
+    return error instanceof Error ? error.message : '定位失败，请手动输入邮编';
+  }
+  if (error.code === 1) return '浏览器没有获得定位权限';
+  if (error.code === 2) return '暂时无法读取当前位置';
+  if (error.code === 3) return '定位超时，请手动输入邮编';
+  return '定位失败，请手动输入邮编';
+}
+
+function getCurrentPosition(options: PositionOptions) {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error('当前浏览器不支持定位'));
+  }
+
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+function isDetectedLocation(value: unknown): value is DetectedLocation {
+  if (typeof value !== 'object' || value === null) return false;
+  const location = value as Partial<DetectedLocation>;
+  return typeof location.zip === 'string' && /^\d{5}$/.test(location.zip);
+}
+
+function detectedLocationLabel(location: DetectedLocation) {
+  if (location.city && location.state) {
+    return `已定位到 ${location.city}, ${location.state} ${location.zip}`;
+  }
+  return `已定位到 ${location.zip}`;
+}
+
+async function lookupLocationZip(position: GeolocationPosition) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), locationLookupTimeoutMs);
+
+  try {
+    const res = await fetch('/api/location', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+      }),
+    });
+    const data: unknown = res.ok ? await res.json() : await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
+        ? data.error
+        : '定位失败，请手动输入邮编';
+      throw new Error(message);
+    }
+    if (!isDetectedLocation(data)) {
+      throw new Error('没有匹配到有效美国邮编');
+    }
+    return data;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 const rangeOptions = [
@@ -152,10 +239,13 @@ export default function Home() {
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [location, setLocation] = useState<LocationState>({ status: 'idle', message: '' });
   const [elapsed, setElapsed] = useState(0);
   const startTimeRef = useRef(0);
+  const locationRequestIdRef = useRef(0);
   const prewarmedDatesRef = useRef<Set<string>>(new Set());
   const days = daysBetweenInclusive(startDate, endDate);
+  const isLocating = location.status === 'requesting' || location.status === 'resolving';
   const activeRangeDays = rangeOptions.find(option => {
     return startDate === today && endDate === addDays(today, option.days - 1);
   })?.days;
@@ -198,9 +288,9 @@ export default function Home() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       void (async () => {
-        for (const location of popularLocations) {
+        for (const loc of popularLocations) {
           const params = new URLSearchParams({
-            zip: location.zip,
+            zip: loc.zip,
             startDate,
             endDate,
             prewarm: '1',
@@ -278,6 +368,32 @@ export default function Home() {
     void search(nextZip);
   }
 
+  async function detectCurrentLocation() {
+    const requestId = locationRequestIdRef.current + 1;
+    locationRequestIdRef.current = requestId;
+    setLocation({ status: 'requesting', message: '请允许浏览器读取当前位置' });
+
+    try {
+      const position = await getCurrentPosition({
+        enableHighAccuracy: false,
+        maximumAge: 10 * 60 * 1000,
+        timeout: 10000,
+      });
+      if (requestId !== locationRequestIdRef.current) return;
+
+      setLocation({ status: 'resolving', message: '正在匹配附近邮编…' });
+      const detected = await lookupLocationZip(position);
+      if (requestId !== locationRequestIdRef.current) return;
+
+      setZip(detected.zip);
+      setLocation({ status: 'done', message: detectedLocationLabel(detected) });
+      void search(detected.zip);
+    } catch (error: unknown) {
+      if (requestId !== locationRequestIdRef.current) return;
+      setLocation({ status: 'error', message: locationErrorMessage(error) });
+    }
+  }
+
   return (
     <main className="min-h-screen bg-gray-950 text-white px-4 py-12">
       <div className="max-w-4xl mx-auto">
@@ -339,29 +455,48 @@ export default function Home() {
           >
             {status === 'loading' ? `查询中… ${fmtTime(elapsed)}` : '搜索'}
           </button>
+          <button
+            type="button"
+            onClick={detectCurrentLocation}
+            disabled={isLocating || status === 'loading'}
+            className="px-4 py-2 rounded-lg border border-gray-700 bg-gray-900 text-sm font-semibold text-gray-200 hover:border-gray-500 hover:text-white disabled:opacity-50 transition-colors"
+          >
+            {isLocating ? '定位中…' : '当前位置'}
+          </button>
         </div>
 
         <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
-          {popularLocations.map(location => {
-            const selected = zip === location.zip;
+          {popularLocations.map(loc => {
+            const selected = zip === loc.zip;
 
             return (
               <button
-                key={location.zip}
+                key={loc.zip}
                 type="button"
-                onClick={() => selectPopularLocation(location.zip)}
+                onClick={() => selectPopularLocation(loc.zip)}
                 className={`rounded-md border px-3 py-1.5 text-left text-xs transition-colors ${
                   selected
                     ? 'border-blue-400 bg-blue-500/15 text-blue-100'
                     : 'border-gray-800 bg-gray-900 text-gray-300 hover:border-gray-600 hover:text-white'
                 }`}
               >
-                <span className="font-semibold">{location.label}</span>
-                <span className="ml-1 text-gray-500">{location.description}</span>
+                <span className="font-semibold">{loc.label}</span>
+                <span className="ml-1 text-gray-500">{loc.description}</span>
               </button>
             );
           })}
         </div>
+
+        {location.message && (
+          <p
+            aria-live="polite"
+            className={`mb-3 text-center text-xs ${
+              location.status === 'error' ? 'text-red-400' : 'text-gray-500'
+            }`}
+          >
+            {location.message}
+          </p>
+        )}
 
         <div className="h-6 flex items-center justify-center mb-7">
           {status === 'done' && (
