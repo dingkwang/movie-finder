@@ -22,7 +22,7 @@ interface Movie {
 }
 
 type AudioFilter = 'all' | Movie['originalAudio'];
-type RadiusMiles = 10 | 50 | 200;
+type RadiusMiles = 10 | 40 | 200;
 
 interface DateShowing {
   time: string;
@@ -147,7 +147,7 @@ const audioFilterOptions: { value: AudioFilter; label: string }[] = [
 
 const radiusOptions: { value: RadiusMiles; label: string }[] = [
   { value: 10, label: '10 mile' },
-  { value: 50, label: '50 mile' },
+  { value: 40, label: '40 mile' },
   { value: 200, label: '200 mile' },
 ];
 
@@ -253,7 +253,7 @@ export default function Home() {
   const [zip, setZip] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-  const [radius, setRadius] = useState<RadiusMiles>(50);
+  const [radius, setRadius] = useState<RadiusMiles>(40);
   const [audioFilter, setAudioFilter] = useState<AudioFilter>('all');
   const [movies, setMovies] = useState<Movie[]>([]);
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
@@ -305,7 +305,7 @@ export default function Home() {
 
   useEffect(() => {
     if (days > 7) return;
-    if (radius > 50) return;
+    if (radius > 40) return;
     const prewarmKey = `${startDate}:${endDate}:${radius}`;
     if (prewarmedDatesRef.current.has(prewarmKey)) return;
     prewarmedDatesRef.current.add(prewarmKey);
