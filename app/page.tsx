@@ -56,7 +56,7 @@ function currentTimeMs() {
 const locationLookupTimeoutMs = 9000;
 
 function isGeolocationPositionError(error: unknown): error is GeolocationPositionError {
-  return typeof error === 'object' && error !== null && 'code' in error;
+  return error instanceof GeolocationPositionError;
 }
 
 function isAbortError(error: unknown) {
@@ -111,7 +111,7 @@ async function lookupLocationZip(position: GeolocationPosition) {
         lon: position.coords.longitude,
       }),
     });
-    const data: unknown = await res.json().catch(() => ({}));
+    const data: unknown = res.ok ? await res.json() : await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
         ? data.error
@@ -288,9 +288,9 @@ export default function Home() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       void (async () => {
-        for (const location of popularLocations) {
+        for (const loc of popularLocations) {
           const params = new URLSearchParams({
-            zip: location.zip,
+            zip: loc.zip,
             startDate,
             endDate,
             prewarm: '1',
@@ -466,22 +466,22 @@ export default function Home() {
         </div>
 
         <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
-          {popularLocations.map(location => {
-            const selected = zip === location.zip;
+          {popularLocations.map(loc => {
+            const selected = zip === loc.zip;
 
             return (
               <button
-                key={location.zip}
+                key={loc.zip}
                 type="button"
-                onClick={() => selectPopularLocation(location.zip)}
+                onClick={() => selectPopularLocation(loc.zip)}
                 className={`rounded-md border px-3 py-1.5 text-left text-xs transition-colors ${
                   selected
                     ? 'border-blue-400 bg-blue-500/15 text-blue-100'
                     : 'border-gray-800 bg-gray-900 text-gray-300 hover:border-gray-600 hover:text-white'
                 }`}
               >
-                <span className="font-semibold">{location.label}</span>
-                <span className="ml-1 text-gray-500">{location.description}</span>
+                <span className="font-semibold">{loc.label}</span>
+                <span className="ml-1 text-gray-500">{loc.description}</span>
               </button>
             );
           })}

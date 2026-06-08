@@ -1,5 +1,6 @@
 const CENSUS_GEOCODER_BASE = 'https://geocoding.geo.census.gov/geocoder/geographies/coordinates';
 const CENSUS_LOOKUP_TIMEOUT_MS = 8000;
+const CENSUS_LAYERS = 'ZIP Code Tabulation Areas,Incorporated Places,County Subdivisions,States';
 
 export const maxDuration = 10;
 
@@ -14,6 +15,7 @@ function json(payload, init = {}) {
 }
 
 function parseCoordinate(value, min, max) {
+  if (value == null || value === '') return null;
   const number = Number(value);
   if (!Number.isFinite(number) || number < min || number > max) return null;
   return number;
@@ -42,23 +44,26 @@ function extractLocation(data) {
   };
 }
 
-async function fetchCensusGeographies(lat, lon) {
+async function fetchCensusData(lat, lon) {
   const params = new URLSearchParams({
     x: String(lon),
     y: String(lat),
     benchmark: 'Public_AR_Current',
     vintage: 'Current_Current',
-    layers: 'all',
+    layers: CENSUS_LAYERS,
     format: 'json',
   });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CENSUS_LOOKUP_TIMEOUT_MS);
 
   try {
-    return await fetch(`${CENSUS_GEOCODER_BASE}?${params.toString()}`, {
+    const res = await fetch(`${CENSUS_GEOCODER_BASE}?${params.toString()}`, {
       cache: 'no-store',
       signal: controller.signal,
     });
+    if (!res.ok) return { ok: false };
+    const data = await res.json();
+    return { ok: true, data };
   } finally {
     clearTimeout(timeout);
   }
@@ -79,19 +84,21 @@ export async function POST(request) {
   }
 
   try {
-    const res = await fetchCensusGeographies(lat, lon);
-    if (!res.ok) {
+    const result = await fetchCensusData(lat, lon);
+    if (!result.ok) {
       return json({ error: '定位服务暂时不可用，请手动输入邮编' }, { status: 502 });
     }
 
-    const data = await res.json();
-    const location = extractLocation(data);
+    const location = extractLocation(result.data);
     if (!/^\d{5}$/.test(location.zip ?? '')) {
       return json({ error: '当前位置没有匹配到美国邮编' }, { status: 404 });
     }
 
     return json(location);
-  } catch {
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      return json({ error: '定位服务响应超时，请手动输入邮编' }, { status: 504 });
+    }
     return json({ error: '定位服务暂时不可用，请手动输入邮编' }, { status: 500 });
   }
 }
