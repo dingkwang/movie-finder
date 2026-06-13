@@ -6,18 +6,20 @@ import {
   inferOriginalAudio,
   parseYear,
   pickBestTmdbResult,
-} from './movie-matching';
-import { checkRateLimit, rateLimitHeaders } from '../../lib/rate-limit';
-import { recordUsageEvent } from '../../lib/usage';
+} from './movie-matching.js';
+import { checkRateLimit, rateLimitHeaders } from '../../lib/rate-limit.js';
+import { recordUsageEvent } from '../../lib/usage.js';
 
 const DEFAULT_RANGE_DAYS = 1;
 const MAX_RANGE_DAYS = 30;
 const APP_TIME_ZONE = 'America/Los_Angeles';
 const TMDB_DETAIL_CANDIDATE_LIMIT = 8;
-const SEARCH_RADIUS_OPTIONS = new Set([10, 40, 200]);
+const SEARCH_RADIUS_OPTIONS = new Set([10, 40, 100, 200]);
 const DEFAULT_SEARCH_RADIUS_MILES = 40;
+const MAX_TMS_RADIUS_MILES = 100;
 const TMS_BASE = 'https://data.tmsapi.com/v1.1';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
+const TMS_LOOKUP_CONCURRENCY = 3;
 const TMDB_LOOKUP_CONCURRENCY = 4;
 const STANDARD_SEARCH_CACHE_SECONDS = 60 * 60 * 6;
 const STANDARD_SEARCH_STALE_SECONDS = 60 * 60 * 12;
@@ -122,9 +124,9 @@ function parseSearchRange(searchParams) {
 function parseSearchRadius(searchParams) {
   const requestedRadius = Number(searchParams.get('radius') ?? DEFAULT_SEARCH_RADIUS_MILES);
   if (!Number.isInteger(requestedRadius) || !SEARCH_RADIUS_OPTIONS.has(requestedRadius)) {
-    throw new Error('搜索范围必须是 10、40 或 200 mile');
+    throw new Error('搜索范围必须是 10、40、100 mile，旧的 200 mile 链接会自动按 100 mile 查询');
   }
-  return requestedRadius;
+  return Math.min(requestedRadius, MAX_TMS_RADIUS_MILES);
 }
 
 function wait(ms) {
@@ -214,7 +216,11 @@ async function getShowtimesForDate(zip, date, radius, metrics) {
       tags: [`tms-showtimes-${zip}-${date}-${radius}`],
     },
   }, TMS_FETCH_TIMEOUT_MS, 'TMS');
-  if (!res.ok) throw new Error(`TMS error ${res.status}`);
+  if (!res.ok) {
+    const error = new Error(`TMS error ${res.status}`);
+    error.status = res.status;
+    throw error;
+  }
   const text = await res.text();
   if (!text.trim()) return [];
   return JSON.parse(text);
@@ -222,7 +228,11 @@ async function getShowtimesForDate(zip, date, radius, metrics) {
 
 async function getShowtimes(zip, date, radius, metrics) {
   if (Array.isArray(date)) {
-    const batches = await Promise.all(date.map(item => getShowtimesForDate(zip, item, radius, metrics)));
+    const batches = await mapWithConcurrency(
+      date,
+      TMS_LOOKUP_CONCURRENCY,
+      item => getShowtimesForDate(zip, item, radius, metrics)
+    );
     return batches.flat();
   }
   return getShowtimesForDate(zip, date, radius, metrics);
@@ -304,6 +314,35 @@ function formatShowtime(dateTime, includeDate) {
 
 function normalizeTicketUrl(url) {
   return url?.replace(/^http:/, 'https:') ?? null;
+}
+
+function errorResponse(err) {
+  const message = err instanceof Error ? err.message : 'Unknown error';
+  const providerStatus = err instanceof Error && err.status != null
+    ? Number(err.status)
+    : null;
+
+  if (message === 'TMS timeout') {
+    return {
+      status: 504,
+      message: '院线数据源响应超时，请稍后重试或缩小日期范围。',
+    };
+  }
+
+  if (message.startsWith('TMS error')) {
+    if (providerStatus === 401 || providerStatus === 403) {
+      return {
+        status: 502,
+        message: '院线数据源暂时不可用，请稍后重试。',
+      };
+    }
+    return {
+      status: providerStatus && providerStatus >= 500 ? 502 : 400,
+      message: '院线数据源暂时无法处理这个查询，请缩小范围或换日期重试。',
+    };
+  }
+
+  return { status: 500, message };
 }
 
 export async function GET(request) {
@@ -448,6 +487,7 @@ export async function GET(request) {
     return Response.json(result, { headers: successCacheHeaders() });
   } catch (err) {
     console.error(err);
+    const response = errorResponse(err);
     if (shouldRecordUsage) {
       await recordUsageEvent({
         eventType: 'movie_search_backend',
@@ -462,9 +502,9 @@ export async function GET(request) {
         tmdbDetailCount: metrics.tmdbDetailCount,
         tmdbRequestCount: metrics.tmdbRequestCount,
         status: 'error',
-        error: err.message,
+        error: err instanceof Error ? err.message : 'Unknown error',
       }, request);
     }
-    return Response.json({ error: err.message }, { status: 500 });
+    return Response.json({ error: response.message }, { status: response.status });
   }
 }

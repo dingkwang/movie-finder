@@ -1,6 +1,6 @@
 import postgres from 'postgres';
 import { createHash, randomBytes } from 'crypto';
-import { requestMetadata } from './usage';
+import { requestMetadata } from './usage.js';
 
 const RATE_LIMIT_TABLE = 'rate_limit_buckets';
 const CLEANUP_PROBABILITY = 0.01;
@@ -74,7 +74,7 @@ function anonymousHash(value) {
 }
 
 function costUnits({ days, radius }) {
-  const radiusMultiplier = radius >= 200 ? 6 : radius >= 40 ? 2 : 1;
+  const radiusMultiplier = radius >= 100 ? 4 : radius >= 40 ? 2 : 1;
   return Math.max(1, Math.min(120, Number(days || 1) * radiusMultiplier));
 }
 
@@ -86,21 +86,21 @@ function rulesFor({ endpoint, ipHash, zip, days, radius }) {
       name: 'ip-burst',
       key: `${endpoint}:ip:${ipHash}:burst`,
       windowMs: 10 * 60 * 1000,
-      limit: 20,
+      limit: 40,
       increment: 1,
     },
     {
       name: 'ip-daily-cost',
       key: `${endpoint}:ip:${ipHash}:daily-cost`,
       windowMs: 24 * 60 * 60 * 1000,
-      limit: 160,
+      limit: 300,
       increment: units,
     },
     {
       name: 'ip-zip-burst',
       key: `${endpoint}:ip:${ipHash}:zip:${normalizedZip}:burst`,
       windowMs: 10 * 60 * 1000,
-      limit: 8,
+      limit: 20,
       increment: 1,
     },
     {
@@ -112,12 +112,12 @@ function rulesFor({ endpoint, ipHash, zip, days, radius }) {
     },
   ];
 
-  if (radius >= 200 || days > 7) {
+  if (radius >= 100 || days > 7) {
     rules.push({
       name: 'expensive-hourly',
       key: `${endpoint}:ip:${ipHash}:expensive`,
       windowMs: 60 * 60 * 1000,
-      limit: 4,
+      limit: 10,
       increment: 1,
     });
   }

@@ -22,7 +22,7 @@ interface Movie {
 }
 
 type AudioFilter = 'all' | Movie['originalAudio'];
-type RadiusMiles = 10 | 40 | 200;
+type RadiusMiles = 10 | 40 | 100;
 
 interface DateShowing {
   time: string;
@@ -148,7 +148,7 @@ const audioFilterOptions: { value: AudioFilter; label: string }[] = [
 const radiusOptions: { value: RadiusMiles; label: string }[] = [
   { value: 10, label: '10 mile' },
   { value: 40, label: '40 mile' },
-  { value: 200, label: '200 mile' },
+  { value: 100, label: '100 mile' },
 ];
 
 const popularLocations = [
