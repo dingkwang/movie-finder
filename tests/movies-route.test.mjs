@@ -69,6 +69,30 @@ async function assertTmsFailureResponse({
 }
 
 describe('movies API route', () => {
+  it('uses 10 mile as the default search radius', async () => {
+    await withMovieApiEnv(async () => {
+      const originalFetch = globalThis.fetch;
+      const tmsUrls = [];
+      globalThis.fetch = async (url) => {
+        const textUrl = String(url);
+        if (textUrl.includes('data.tmsapi.com')) {
+          tmsUrls.push(new URL(textUrl));
+          return new Response('[]', { status: 200 });
+        }
+        throw new Error(`Unexpected fetch: ${textUrl}`);
+      };
+
+      try {
+        const res = await GET(requestFor('/api/movies?zip=95129&prewarm=1'));
+        assert.equal(res.status, 200);
+        assert.equal(tmsUrls.length, 1);
+        assert.equal(tmsUrls[0].searchParams.get('radius'), '10');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
   it('normalizes legacy 200 mile requests to the supported TMS radius', async () => {
     await withMovieApiEnv(async () => {
       const originalFetch = globalThis.fetch;

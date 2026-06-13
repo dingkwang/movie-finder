@@ -254,7 +254,7 @@ export default function Home() {
   const [zip, setZip] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-  const [radius, setRadius] = useState<RadiusMiles>(40);
+  const [radius, setRadius] = useState<RadiusMiles>(10);
   const [audioFilter, setAudioFilter] = useState<AudioFilter>('all');
   const [movies, setMovies] = useState<Movie[]>([]);
   const [expandedMovies, setExpandedMovies] = useState<Record<string, boolean>>({});
