@@ -212,6 +212,8 @@ describe('movies API route', () => {
                 id: 1280738,
                 title: '火遮眼',
                 original_title: '火遮眼',
+                // Deliberately en: The Furious is accepted through HK production
+                // country plus Mandarin spoken language, not original_language.
                 original_language: 'en',
                 release_date: '2026-06-10',
                 production_countries: [{ iso_3166_1: 'HK' }],

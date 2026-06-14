@@ -349,14 +349,15 @@ function fandangoSearchUrl(movie, tmdb) {
     ?? parseYear(movie.releaseDate)
     ?? parseYear(movie.releaseYear);
   const query = [movie.title, year].filter(Boolean).join(' ');
+  if (!query) return null;
   return `https://www.fandango.com/search?q=${encodeURIComponent(query)}`;
 }
 
 function ticketUrlFor(rawUrl, movie, tmdb, date) {
   const url = normalizeTicketUrl(rawUrl);
   if (!url) return null;
-  if (url && !isFandangoUrl(url)) return url;
-  if (url && isFandangoMovieOverviewUrl(url)) return addFandangoDate(url, date);
+  if (!isFandangoUrl(url)) return url;
+  if (isFandangoMovieOverviewUrl(url)) return addFandangoDate(url, date);
   return fandangoSearchUrl(movie, tmdb);
 }
 
