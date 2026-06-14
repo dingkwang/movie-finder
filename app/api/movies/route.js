@@ -316,6 +316,50 @@ function normalizeTicketUrl(url) {
   return url?.replace(/^http:/, 'https:') ?? null;
 }
 
+function isFandangoUrl(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().endsWith('fandango.com');
+  } catch {
+    return false;
+  }
+}
+
+function isFandangoMovieOverviewUrl(url) {
+  try {
+    return new URL(url).pathname.toLowerCase().includes('/movie-overview');
+  } catch {
+    return false;
+  }
+}
+
+function addFandangoDate(url, date) {
+  try {
+    const parsed = new URL(url);
+    if (date && !parsed.searchParams.has('date')) {
+      parsed.searchParams.set('date', date);
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function fandangoSearchUrl(movie, tmdb) {
+  const year = parseYear(tmdb?.release_date)
+    ?? parseYear(movie.releaseDate)
+    ?? parseYear(movie.releaseYear);
+  const query = [movie.title, year].filter(Boolean).join(' ');
+  return `https://www.fandango.com/search?q=${encodeURIComponent(query)}`;
+}
+
+function ticketUrlFor(rawUrl, movie, tmdb, date) {
+  const url = normalizeTicketUrl(rawUrl);
+  if (!url) return null;
+  if (url && !isFandangoUrl(url)) return url;
+  if (url && isFandangoMovieOverviewUrl(url)) return addFandangoDate(url, date);
+  return fandangoSearchUrl(movie, tmdb);
+}
+
 function errorResponse(err) {
   const message = err instanceof Error ? err.message : 'Unknown error';
   const providerStatus = err instanceof Error && err.status != null
@@ -463,7 +507,10 @@ export async function GET(request) {
       overview: m.tmdb?.overview ?? m.longDescription ?? '',
       releaseDate: m.tmdb?.release_date ?? String(m.releaseDate ?? m.releaseYear ?? ''),
       originalAudio: inferOriginalAudio(m, m.tmdb),
-      theaters: m.theaters,
+      theaters: m.theaters.map(theater => ({
+        ...theater,
+        ticketUrl: ticketUrlFor(theater.ticketUrl, m, m.tmdb, startDate),
+      })),
     }));
 
     if (shouldRecordUsage) {

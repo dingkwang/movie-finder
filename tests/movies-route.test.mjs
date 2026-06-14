@@ -179,4 +179,85 @@ describe('movies API route', () => {
       ip: '198.51.100.14',
     });
   });
+
+  it('replaces generic Fandango TMS redirect links with movie search links', async () => {
+    await withMovieApiEnv(async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url) => {
+        const textUrl = String(url);
+        if (textUrl.includes('data.tmsapi.com')) {
+          return Response.json([
+            {
+              title: 'The Furious',
+              tmsId: 'MV027940780000',
+              releaseYear: 2025,
+              releaseDate: '2025-09-07',
+              topCast: ['Xie Miao', 'Joe Taslim'],
+              directors: ['Kenji Tanigaki'],
+              showtimes: [
+                {
+                  dateTime: '2026-06-13T10:00',
+                  ticketURI: 'http://www.fandango.com/tms.asp?t=AAYTC&m=319777&d=2026-06-13',
+                  quals: 'Mandarin',
+                  theatre: { name: 'AMC Sunnyvale 12' },
+                },
+              ],
+            },
+          ]);
+        }
+        if (textUrl.includes('api.themoviedb.org/3/search/movie')) {
+          return Response.json({
+            results: [
+              {
+                id: 1280738,
+                title: '火遮眼',
+                original_title: '火遮眼',
+                original_language: 'en',
+                release_date: '2026-06-10',
+                production_countries: [{ iso_3166_1: 'HK' }],
+                spoken_languages: [{ iso_639_1: 'zh', english_name: 'Mandarin' }],
+                alternative_titles: { titles: [{ iso_3166_1: 'US', title: 'The Furious' }] },
+              },
+            ],
+          });
+        }
+        if (textUrl.includes('api.themoviedb.org/3/movie/1280738')) {
+          if (textUrl.includes('language=en-US')) {
+            return Response.json({
+              credits: {
+                cast: [{ name: 'Xie Miao' }, { name: 'Joe Taslim' }],
+                crew: [{ job: 'Director', name: 'Kenji Tanigaki' }],
+              },
+            });
+          }
+          return Response.json({
+            id: 1280738,
+            title: '火遮眼',
+            original_title: '火遮眼',
+            original_language: 'en',
+            release_date: '2026-06-10',
+            poster_path: '/poster.jpg',
+            overview: 'A Chinese-language action film.',
+            production_countries: [{ iso_3166_1: 'HK' }],
+            spoken_languages: [{ iso_639_1: 'zh', english_name: 'Mandarin' }],
+            alternative_titles: { titles: [{ iso_3166_1: 'US', title: 'The Furious' }] },
+          });
+        }
+        throw new Error(`Unexpected fetch: ${textUrl}`);
+      };
+
+      try {
+        const res = await GET(requestFor('/api/movies?zip=94041&date=2026-06-13&radius=40&prewarm=1'));
+        const data = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(data.length, 1);
+        assert.equal(
+          data[0].theaters[0].ticketUrl,
+          'https://www.fandango.com/search?q=The%20Furious%202026'
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });

@@ -136,6 +136,10 @@ function dateOrNull(value) {
   return text;
 }
 
+function normalizeWindowHours(hours) {
+  return Math.max(1, Math.min(168, Math.round(Number(hours) || 12)));
+}
+
 export async function recordUsageEvent(event, request) {
   if (!usageDatabaseConfigured()) return { enabled: false };
 
@@ -199,6 +203,8 @@ export async function getUsageDashboardData({ hours = 12 } = {}) {
 
   const db = await ensureUsageTable();
   if (!db) return { configured: false };
+  const windowHours = normalizeWindowHours(hours);
+  const windowInterval = `${windowHours} hours`;
 
   const [
     totals,
@@ -235,7 +241,7 @@ export async function getUsageDashboardData({ hours = 12 } = {}) {
     `,
     db`
       select
-        to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day,
+        to_char(date_trunc('day', created_at at time zone 'America/Los_Angeles'), 'YYYY-MM-DD') as day,
         count(*) filter (where event_type = 'movie_search')::int as searches,
         count(distinct ip_hash)::int as unique_users
       from usage_events
@@ -293,6 +299,7 @@ export async function getUsageDashboardData({ hours = 12 } = {}) {
         user_agent,
         error
       from usage_events
+      where created_at >= now() - ${windowInterval}::interval
       order by created_at desc
       limit 100
     `,
@@ -354,7 +361,7 @@ export async function getUsageDashboardData({ hours = 12 } = {}) {
     `,
   ]);
 
-  const window = await getUsageWindowData({ hours });
+  const window = await getUsageWindowData({ hours: windowHours });
 
   return {
     configured: true,
@@ -379,7 +386,7 @@ export async function getUsageWindowData({ hours = 12 } = {}) {
   const db = await ensureUsageTable();
   if (!db) return { configured: false };
 
-  const windowHours = Math.max(1, Math.min(168, Math.round(Number(hours) || 12)));
+  const windowHours = normalizeWindowHours(hours);
   const windowInterval = `${windowHours} hours`;
 
   const [
