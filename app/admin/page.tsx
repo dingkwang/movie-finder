@@ -185,12 +185,18 @@ function formatDecimal(value: number | null | undefined) {
 }
 
 function formatDateTime(value: string | Date) {
-  return new Intl.DateTimeFormat('zh-CN', {
+  const formatted = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'America/Los_Angeles',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+  return `${formatted} PT`;
+}
+
+function formatLocalTime(value: string) {
+  return `${value} PT`;
 }
 
 function metricLabel(value: string | null | undefined) {
@@ -380,7 +386,7 @@ function WindowEventsTable({ rows }: { rows: WindowEventRow[] }) {
         <tbody className="divide-y divide-gray-800 text-gray-300">
           {rows.map((row, index) => (
             <tr key={`${row.local_time}-${index}`}>
-              <td className="whitespace-nowrap px-3 py-2">{row.local_time}</td>
+              <td className="whitespace-nowrap px-3 py-2">{formatLocalTime(row.local_time)}</td>
               <td className="whitespace-nowrap px-3 py-2">{row.event_type}</td>
               <td className="whitespace-nowrap px-3 py-2">{metricLabel(row.zip)}</td>
               <td className="whitespace-nowrap px-3 py-2">{row.radius ?? '-'}</td>
@@ -486,7 +492,7 @@ function Dashboard({ data, hours }: { data: Extract<DashboardData, { configured:
                         <div key={`${row.local_time}-${index}`} className="text-sm">
                           <div className="flex items-center justify-between gap-3">
                             <span className="min-w-0 truncate text-gray-300">
-                              {row.local_time} · {metricLabel(row.zip)} · {formatSearchRange(row)}
+                              {formatLocalTime(row.local_time)} · {metricLabel(row.zip)} · {formatSearchRange(row)}
                             </span>
                             <span className="shrink-0 text-gray-500">{formatNumber(total)} fetches</span>
                           </div>
@@ -510,7 +516,7 @@ function Dashboard({ data, hours }: { data: Extract<DashboardData, { configured:
                       <div key={`${row.local_time}-${index}`} className="text-sm">
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-gray-300">
-                            {row.local_time} · {row.event_type} · {metricLabel(row.zip)}
+                            {formatLocalTime(row.local_time)} · {row.event_type} · {metricLabel(row.zip)}
                           </span>
                           <span className="text-xs text-red-300">{metricLabel(row.status)}</span>
                         </div>
@@ -573,7 +579,8 @@ function Dashboard({ data, hours }: { data: Extract<DashboardData, { configured:
         </div>
 
         <section className="mt-6 rounded-lg border border-gray-800 bg-gray-900 p-4">
-          <h2 className="mb-4 text-sm font-semibold text-gray-200">最近 100 条</h2>
+          <h2 className="mb-1 text-sm font-semibold text-gray-200">过去 {hours} 小时最近 100 条</h2>
+          <p className="mb-4 text-xs text-gray-500">跟顶部时间窗口一致，时间按 PT 显示。</p>
           {data.recent.length === 0 ? (
             <EmptyState>暂无记录</EmptyState>
           ) : (
