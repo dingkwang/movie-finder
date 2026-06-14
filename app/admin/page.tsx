@@ -93,6 +93,65 @@ interface ErrorRow {
   error: string | null;
 }
 
+interface WindowTotals {
+  total_events: number;
+  searches: number;
+  backend_events: number;
+  unique_users: number;
+  total_results: number;
+  tms_requests: number;
+  tmdb_requests: number;
+  errors: number;
+  rate_limited: number;
+  avg_duration_ms: number | null;
+  latest_event_at: string | Date | null;
+}
+
+interface HourlyRow {
+  hour: string;
+  events: number;
+  searches: number;
+  unique_users: number;
+  tms_requests: number;
+  tmdb_requests: number;
+  errors: number;
+  rate_limited: number;
+}
+
+interface WindowTopZipRow {
+  zip: string;
+  searches: number;
+  unique_users: number;
+  total_results: number;
+}
+
+interface WindowEventRow {
+  local_time: string;
+  event_type: string;
+  zip: string | null;
+  radius: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  result_count?: number | null;
+  duration_ms?: number | null;
+  tms_request_count?: number | null;
+  tmdb_request_count?: number | null;
+  status: string | null;
+  error?: string | null;
+}
+
+interface UsageWindowData {
+  configured: true;
+  generatedAt: string;
+  windowHours: number;
+  totals: WindowTotals;
+  hourly: HourlyRow[];
+  topZips: WindowTopZipRow[];
+  expensive: WindowEventRow[];
+  errors: WindowEventRow[];
+  recent: WindowEventRow[];
+}
+
 type DashboardData =
   | { configured: false }
   | {
@@ -105,6 +164,7 @@ type DashboardData =
       slow: SlowRow[];
       expensive: ExpensiveRow[];
       errors: ErrorRow[];
+      window: UsageWindowData | null;
       table: string;
     };
 
@@ -149,12 +209,69 @@ function formatSearchRange(row: {
   return '-';
 }
 
+function parseHours(value: string | undefined) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 12;
+  return Math.max(1, Math.min(168, Math.round(parsed)));
+}
+
 function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
       <p className="text-xs text-gray-500">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
       {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+    </div>
+  );
+}
+
+const rangeOptions = [
+  { hours: 1, label: '1h' },
+  { hours: 6, label: '6h' },
+  { hours: 12, label: '12h' },
+  { hours: 24, label: '24h' },
+  { hours: 72, label: '3d' },
+  { hours: 168, label: '7d' },
+];
+
+function TimeRangeControls({ hours }: { hours: number }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-gray-800 bg-gray-900 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap gap-2">
+        {rangeOptions.map(option => (
+          <a
+            key={option.hours}
+            href={`/admin?hours=${option.hours}`}
+            className={[
+              'rounded-md border px-3 py-1.5 text-sm',
+              hours === option.hours
+                ? 'border-blue-500 bg-blue-500/15 text-blue-200'
+                : 'border-gray-700 text-gray-300 hover:border-gray-500 hover:text-white',
+            ].join(' ')}
+          >
+            {option.label}
+          </a>
+        ))}
+      </div>
+      <form method="get" action="/admin" className="flex items-center gap-2">
+        <label htmlFor="hours" className="text-sm text-gray-500">过去</label>
+        <input
+          id="hours"
+          name="hours"
+          type="number"
+          min="1"
+          max="168"
+          defaultValue={hours}
+          className="w-20 rounded-md border border-gray-700 bg-gray-950 px-2 py-1.5 text-sm text-white outline-none focus:border-blue-500"
+        />
+        <span className="text-sm text-gray-500">小时</span>
+        <button
+          type="submit"
+          className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500"
+        >
+          应用
+        </button>
+      </form>
     </div>
   );
 }
@@ -240,8 +357,50 @@ function LoginScreen({ failed }: { failed: boolean }) {
   );
 }
 
-function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }> }) {
+function WindowEventsTable({ rows }: { rows: WindowEventRow[] }) {
+  if (rows.length === 0) return <EmptyState>暂无记录</EmptyState>;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-left text-xs">
+        <thead className="text-gray-500">
+          <tr>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">时间</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">事件</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">ZIP</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">Radius</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">日期</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">结果</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">耗时</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">TMS</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">TMDB</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">状态</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800 text-gray-300">
+          {rows.map((row, index) => (
+            <tr key={`${row.local_time}-${index}`}>
+              <td className="whitespace-nowrap px-3 py-2">{row.local_time}</td>
+              <td className="whitespace-nowrap px-3 py-2">{row.event_type}</td>
+              <td className="whitespace-nowrap px-3 py-2">{metricLabel(row.zip)}</td>
+              <td className="whitespace-nowrap px-3 py-2">{row.radius ?? '-'}</td>
+              <td className="whitespace-nowrap px-3 py-2">{formatSearchRange(row)}</td>
+              <td className="whitespace-nowrap px-3 py-2">{row.result_count ?? '-'}</td>
+              <td className="whitespace-nowrap px-3 py-2">{formatDuration(row.duration_ms)}</td>
+              <td className="whitespace-nowrap px-3 py-2">{row.tms_request_count ?? '-'}</td>
+              <td className="whitespace-nowrap px-3 py-2">{row.tmdb_request_count ?? '-'}</td>
+              <td className="whitespace-nowrap px-3 py-2">{metricLabel(row.status)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Dashboard({ data, hours }: { data: Extract<DashboardData, { configured: true }>; hours: number }) {
   const totals = data.totals;
+  const window = data.window;
   const emptyRate = totals.searches > 0
     ? `${Math.round((totals.empty_searches / totals.searches) * 100)}%`
     : '-';
@@ -252,7 +411,7 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Usage Dashboard</h1>
-            <p className="mt-1 text-sm text-gray-500">最近 30 天的查询记录，IP 仅保存 hash 前缀。</p>
+            <p className="mt-1 text-sm text-gray-500">短窗口运营监控 + 最近 30 天概览，IP 仅保存 hash 前缀。</p>
           </div>
           <div className="flex gap-2">
             <a
@@ -270,6 +429,109 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
               </button>
             </form>
           </div>
+        </div>
+
+        <div className="mb-6">
+          <TimeRangeControls hours={hours} />
+        </div>
+
+        {window && (
+          <>
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-100">过去 {window.windowHours} 小时</h2>
+                <p className="text-sm text-gray-500">用于判断刚发布后是否有流量、错误、限流或 provider 成本异常。</p>
+              </div>
+              <p className="hidden text-xs text-gray-600 sm:block">
+                更新于 {formatDateTime(window.generatedAt)}
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard label="搜索" value={formatNumber(window.totals.searches)} />
+              <MetricCard label="独立用户" value={formatNumber(window.totals.unique_users)} hint="按 ip_hash 估算" />
+              <MetricCard label="TMS fetches" value={formatNumber(window.totals.tms_requests)} />
+              <MetricCard label="TMDB fetches" value={formatNumber(window.totals.tmdb_requests)} />
+              <MetricCard label="错误" value={formatNumber(window.totals.errors)} />
+              <MetricCard label="限流" value={formatNumber(window.totals.rate_limited)} />
+              <MetricCard label="平均耗时" value={formatDuration(window.totals.avg_duration_ms)} />
+              <MetricCard label="事件" value={formatNumber(window.totals.total_events)} hint={`${formatNumber(window.totals.backend_events)} backend`} />
+            </div>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-3">
+              <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-gray-200">小时搜索趋势</h2>
+                <BarList rows={window.hourly.map(row => ({ label: row.hour, value: row.searches }))} />
+              </section>
+              <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-gray-200">小时 TMS fetches</h2>
+                <BarList rows={window.hourly.map(row => ({ label: row.hour, value: row.tms_requests }))} />
+              </section>
+              <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-gray-200">窗口 Top ZIP</h2>
+                <BarList rows={window.topZips.map(row => ({ label: `${row.zip} · ${row.unique_users} users`, value: row.searches }))} />
+              </section>
+            </div>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+              <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-gray-200">窗口最贵查询</h2>
+                {window.expensive.length === 0 ? (
+                  <EmptyState>暂无数据</EmptyState>
+                ) : (
+                  <div className="space-y-3">
+                    {window.expensive.map((row, index) => {
+                      const total = (row.tms_request_count ?? 0) + (row.tmdb_request_count ?? 0);
+                      return (
+                        <div key={`${row.local_time}-${index}`} className="text-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate text-gray-300">
+                              {row.local_time} · {metricLabel(row.zip)} · {formatSearchRange(row)}
+                            </span>
+                            <span className="shrink-0 text-gray-500">{formatNumber(total)} fetches</span>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            radius {row.radius ?? '-'} · TMS {row.tms_request_count ?? '-'} · TMDB {row.tmdb_request_count ?? '-'} · {formatDuration(row.duration_ms)}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-gray-200">窗口错误 / 限流</h2>
+                {window.errors.length === 0 ? (
+                  <EmptyState>暂无错误或限流</EmptyState>
+                ) : (
+                  <div className="space-y-3">
+                    {window.errors.map((row, index) => (
+                      <div key={`${row.local_time}-${index}`} className="text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-gray-300">
+                            {row.local_time} · {row.event_type} · {metricLabel(row.zip)}
+                          </span>
+                          <span className="text-xs text-red-300">{metricLabel(row.status)}</span>
+                        </div>
+                        {row.error && <p className="mt-1 truncate text-xs text-gray-500">{row.error}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <section className="mt-6 rounded-lg border border-gray-800 bg-gray-900 p-4">
+              <h2 className="mb-4 text-sm font-semibold text-gray-200">窗口最近事件</h2>
+              <WindowEventsTable rows={window.recent} />
+            </section>
+          </>
+        )}
+
+        <div className="mt-8 mb-3">
+          <h2 className="text-lg font-semibold text-gray-100">30 天概览</h2>
+          <p className="text-sm text-gray-500">长期趋势和累计成本。</p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -443,14 +705,15 @@ function Dashboard({ data }: { data: Extract<DashboardData, { configured: true }
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ login?: string }>;
+  searchParams: Promise<{ login?: string; hours?: string }>;
 }) {
   const query = await searchParams;
+  const hours = parseHours(query.hours);
   if (!(await isAuthorized())) {
     return <LoginScreen failed={query.login === 'failed'} />;
   }
 
-  const data = await getUsageDashboardData() as DashboardData;
+  const data = await getUsageDashboardData({ hours }) as DashboardData;
   if (!data.configured) {
     return (
       <main className="min-h-screen bg-gray-950 px-4 py-16 text-white">
@@ -475,5 +738,5 @@ export default async function AdminPage({
     );
   }
 
-  return <Dashboard data={data} />;
+  return <Dashboard data={data} hours={hours} />;
 }

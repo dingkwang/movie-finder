@@ -192,7 +192,7 @@ export async function recordUsageEvent(event, request) {
   }
 }
 
-export async function getUsageDashboardData() {
+export async function getUsageDashboardData({ hours = 12 } = {}) {
   if (!usageDatabaseConfigured()) {
     return { configured: false };
   }
@@ -354,6 +354,8 @@ export async function getUsageDashboardData() {
     `,
   ]);
 
+  const window = await getUsageWindowData({ hours });
+
   return {
     configured: true,
     totals: totals[0],
@@ -364,6 +366,138 @@ export async function getUsageDashboardData() {
     slow,
     expensive,
     errors,
+    window: window.configured ? window : null,
     table: USAGE_TABLE,
+  };
+}
+
+export async function getUsageWindowData({ hours = 12 } = {}) {
+  if (!usageDatabaseConfigured()) {
+    return { configured: false };
+  }
+
+  const db = await ensureUsageTable();
+  if (!db) return { configured: false };
+
+  const windowHours = Math.max(1, Math.min(168, Math.round(Number(hours) || 12)));
+  const windowInterval = `${windowHours} hours`;
+
+  const [
+    totals,
+    hourly,
+    topZips,
+    expensive,
+    errors,
+    recent,
+  ] = await Promise.all([
+    db`
+      select
+        count(*)::int as total_events,
+        count(*) filter (where event_type = 'movie_search')::int as searches,
+        count(*) filter (where event_type = 'movie_search_backend')::int as backend_events,
+        count(distinct ip_hash)::int as unique_users,
+        coalesce(sum(result_count) filter (where event_type = 'movie_search'), 0)::int as total_results,
+        coalesce(sum(tms_request_count), 0)::int as tms_requests,
+        coalesce(sum(tmdb_request_count), 0)::int as tmdb_requests,
+        count(*) filter (where status = 'error')::int as errors,
+        count(*) filter (where status = 'rate_limited')::int as rate_limited,
+        round(avg(duration_ms) filter (where duration_ms is not null))::int as avg_duration_ms,
+        max(created_at) as latest_event_at
+      from usage_events
+      where created_at >= now() - ${windowInterval}::interval
+    `,
+    db`
+      select
+        to_char(date_trunc('hour', created_at at time zone 'America/Los_Angeles'), 'MM-DD HH24:00') as hour,
+        count(*)::int as events,
+        count(*) filter (where event_type = 'movie_search')::int as searches,
+        count(distinct ip_hash)::int as unique_users,
+        coalesce(sum(tms_request_count), 0)::int as tms_requests,
+        coalesce(sum(tmdb_request_count), 0)::int as tmdb_requests,
+        count(*) filter (where status = 'error')::int as errors,
+        count(*) filter (where status = 'rate_limited')::int as rate_limited
+      from usage_events
+      where created_at >= now() - ${windowInterval}::interval
+      group by 1
+      order by 1
+    `,
+    db`
+      select
+        zip,
+        count(*)::int as searches,
+        count(distinct ip_hash)::int as unique_users,
+        coalesce(sum(result_count), 0)::int as total_results
+      from usage_events
+      where created_at >= now() - ${windowInterval}::interval
+        and event_type = 'movie_search'
+        and zip is not null
+      group by zip
+      order by searches desc, zip
+      limit 10
+    `,
+    db`
+      select
+        to_char(created_at at time zone 'America/Los_Angeles', 'YYYY-MM-DD HH24:MI') as local_time,
+        zip,
+        radius,
+        to_char(start_date, 'YYYY-MM-DD') as start_date,
+        to_char(end_date, 'YYYY-MM-DD') as end_date,
+        result_count,
+        duration_ms,
+        tms_request_count,
+        tmdb_request_count,
+        status,
+        error
+      from usage_events
+      where created_at >= now() - ${windowInterval}::interval
+        and event_type = 'movie_search_backend'
+        and (tms_request_count is not null or tmdb_request_count is not null)
+      order by coalesce(tms_request_count, 0) + coalesce(tmdb_request_count, 0) desc, created_at desc
+      limit 5
+    `,
+    db`
+      select
+        to_char(created_at at time zone 'America/Los_Angeles', 'YYYY-MM-DD HH24:MI') as local_time,
+        event_type,
+        zip,
+        radius,
+        status,
+        left(coalesce(error, ''), 160) as error
+      from usage_events
+      where created_at >= now() - ${windowInterval}::interval
+        and (status in ('error', 'rate_limited') or error is not null)
+      order by created_at desc
+      limit 10
+    `,
+    db`
+      select
+        to_char(created_at at time zone 'America/Los_Angeles', 'YYYY-MM-DD HH24:MI') as local_time,
+        event_type,
+        zip,
+        radius,
+        to_char(start_date, 'YYYY-MM-DD') as start_date,
+        to_char(end_date, 'YYYY-MM-DD') as end_date,
+        result_count,
+        duration_ms,
+        tms_request_count,
+        tmdb_request_count,
+        status
+      from usage_events
+      where created_at >= now() - ${windowInterval}::interval
+      order by created_at desc
+      limit 20
+    `,
+  ]);
+
+  return {
+    configured: true,
+    generatedAt: new Date().toISOString(),
+    windowHours,
+    totals: totals[0],
+    hourly,
+    topZips,
+    expensive,
+    errors,
+    recent,
   };
 }
