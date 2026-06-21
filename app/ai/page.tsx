@@ -44,7 +44,6 @@ function AiSearch() {
   const searchParams = useSearchParams();
   const [q, setQ] = useState(searchParams.get('q') ?? '');
   const [movies, setMovies] = useState<Movie[]>([]);
-  const [rawText, setRawText] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
@@ -67,7 +66,6 @@ function AiSearch() {
     setStatus('loading');
     setError('');
     setMovies([]);
-    setRawText('');
 
     try {
       const res = await fetch(`/api/ai-movies?q=${encodeURIComponent(trimmed)}`);
@@ -90,7 +88,7 @@ function AiSearch() {
       if (parsed) {
         setMovies(parsed.movies ?? []);
       } else {
-        setRawText(accumulated);
+        setMovies([]);
       }
       setElapsed(Math.round((Date.now() - startTimeRef.current) / 100) / 10);
       setStatus('done');
@@ -142,26 +140,21 @@ function AiSearch() {
           {status === 'loading' && (
             <span className="text-amber-500/70 text-xs">正在搜索网络…</span>
           )}
-          {status === 'done' && (
-            <span className="text-xs text-gray-500">
-              {movies.length > 0 ? `找到 ${movies.length} 部` : rawText ? 'AI 回复' : '无结果'} · 用时 {fmtTime(elapsed)}
-            </span>
-          )}
+        {status === 'done' && (
+          <span className="text-xs text-gray-500">
+              {movies.length > 0 ? `找到 ${movies.length} 部` : '无可展示排片'} · 用时 {fmtTime(elapsed)}
+          </span>
+        )}
         </div>
 
         {status === 'error' && (
           <p className="text-red-400 text-center mb-6">{error}</p>
         )}
 
-        {status === 'done' && movies.length === 0 && !rawText && (
-          <p className="text-gray-500 text-center">没有在网页结果里找到可用来源</p>
-        )}
-
-        {status === 'done' && rawText && (
-          <div className="bg-gray-900 rounded-xl p-6 border border-amber-900/40 text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
-            <span className="text-xs font-semibold bg-amber-600 text-white px-2 py-0.5 rounded-full mb-3 inline-block">AI</span>
-            <p className="mt-2">{rawText}</p>
-          </div>
+        {status === 'done' && movies.length === 0 && (
+          <p className="mx-auto max-w-md text-center text-sm leading-relaxed text-gray-500">
+            没有找到可直接展示的具体排片。请尽量输入电影名、邮编和日期，例如 Dear You 10017 2026-06-26。
+          </p>
         )}
 
         {status === 'done' && movies.length > 0 && (
@@ -194,9 +187,6 @@ function AiSearch() {
                         </div>
                       ))}
                     </div>
-                  )}
-                  {m.theaters.length === 0 && (
-                    <p className="mb-3 text-xs text-gray-500">搜索结果里没有可直接提取的具体时间，请点来源确认。</p>
                   )}
                   {m.source_url ? (
                     <a href={m.source_url} target="_blank" rel="noopener noreferrer" className="text-amber-600/70 hover:text-amber-500 text-xs underline underline-offset-2 truncate block">

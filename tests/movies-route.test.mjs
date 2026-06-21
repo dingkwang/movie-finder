@@ -196,8 +196,8 @@ describe('movies API route', () => {
               directors: ['Kenji Tanigaki'],
               showtimes: [
                 {
-                  dateTime: '2026-06-13T10:00',
-                  ticketURI: 'http://www.fandango.com/tms.asp?t=AAYTC&m=319777&d=2026-06-13',
+                  dateTime: '2026-06-14T10:00',
+                  ticketURI: 'http://www.fandango.com/tms.asp?t=AAYTC&m=319777&d=2026-06-14',
                   quals: 'Mandarin',
                   theatre: { name: 'AMC Sunnyvale 12' },
                 },
@@ -249,7 +249,7 @@ describe('movies API route', () => {
       };
 
       try {
-        const res = await GET(requestFor('/api/movies?zip=94041&date=2026-06-13&radius=40&prewarm=1'));
+        const res = await GET(requestFor('/api/movies?zip=94041&radius=40&prewarm=1'));
         const data = await res.json();
         assert.equal(res.status, 200);
         assert.equal(data.length, 1);

@@ -74,6 +74,10 @@ function firstNonEmpty(...values) {
   return values.find(value => typeof value === 'string' && value.trim())?.trim() ?? null;
 }
 
+function escapeRegExp(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function inferTitleFromQuery(query) {
   const cleaned = normalizeQuery(query)
     .replace(/\b(movie|film|showtimes?|tickets?|near|playing|opens?|opening)\b/ig, ' ')
@@ -151,12 +155,13 @@ function sanitizeMovie(movie, evidence) {
         const times = Array.isArray(theater?.times)
           ? Array.from(new Set(theater.times.map(String).filter(time => hasTimeEvidence(time, evidence))))
           : [];
+        if (times.length === 0) return null;
         return { name, times };
       })
       .filter(Boolean)
     : [];
 
-  if (!titleZh && !titleEn && theaters.length === 0 && !sourceUrl) return null;
+  if (theaters.length === 0) return null;
   return {
     title_zh: titleZh,
     title_en: titleEn,
@@ -174,6 +179,7 @@ function sanitizeMovies(movies, evidence) {
 }
 
 function deterministicMovies(query, evidence) {
+  const showtimeTheaters = evidence.showtimes.filter(theater => theater.times.length > 0);
   const preferredSource = evidence.organicResults.find(result => {
     return /regmovies|amctheatres|atomtickets|fandango/i.test(result.link);
   }) ?? evidence.organicResults[0];
@@ -184,34 +190,79 @@ function deterministicMovies(query, evidence) {
   );
   const description = firstNonEmpty(evidence.knowledgeGraph?.description);
 
-  if (evidence.showtimes.length > 0) {
+  if (showtimeTheaters.length > 0) {
     return [{
       title_zh: null,
       title_en: title,
       description,
-      theaters: evidence.showtimes.map(theater => ({
+      theaters: showtimeTheaters.map(theater => ({
         name: theater.distance ? `${theater.name} · ${theater.distance}` : theater.name,
         times: theater.times,
       })),
       source_note: 'Google 排片卡片',
-      source_url: preferredSource?.link ?? evidence.searchUrl ?? null,
+      source_url: evidence.searchUrl ?? preferredSource?.link ?? null,
       confidence: 'high',
     }];
   }
 
-  if (preferredSource) {
-    return [{
-      title_zh: null,
-      title_en: title,
-      description,
-      theaters: [],
-      source_note: '找到相关购票/影院来源，点开确认时间',
-      source_url: preferredSource.link,
-      confidence: 'low',
-    }];
+  return [];
+}
+
+function moviePlayingCandidates(evidence) {
+  const candidates = Array.isArray(evidence.knowledgeGraph?.moviesPlaying)
+    ? evidence.knowledgeGraph.moviesPlaying
+    : [];
+  const seen = new Set();
+  return candidates
+    .map(movie => firstNonEmpty(movie?.name))
+    .filter(Boolean)
+    .filter(name => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 5);
+}
+
+function candidateQueryForTitle(query, title) {
+  const stripped = normalizeQuery(query)
+    .replace(new RegExp(escapeRegExp(title), 'ig'), ' ')
+    .replace(/\b(movie|film|showtimes?|tickets?|near|near me|playing|opens?|opening|in theater|in theaters?|in theatre|in theatres?)\b/ig, ' ')
+    .replace(/\b(19|20)\d{2}\b/g, ' ')
+    .replace(/\b\d{5}\b/g, ' ')
+    .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/ig, ' ')
+    .replace(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b/ig, ' ')
+    .replace(/\b(am|pm|ny|nyc|new york|ca|la|sf)\b/ig, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalizeQuery(`${title} showtimes ${stripped}`);
+}
+
+async function extractFromCandidateSearches(query, evidence) {
+  const zip = zipFromQuery(query);
+  const candidates = moviePlayingCandidates(evidence);
+  if (candidates.length === 0) return null;
+
+  let attempted = 0;
+  for (const title of candidates) {
+    attempted += 1;
+    const candidateQuery = candidateQueryForTitle(query, title);
+    const candidateEvidence = await searchMovieShowtimeEvidence(candidateQuery, zip ? { location: zip } : {});
+    if (!candidateEvidence.configured) continue;
+
+    const deterministic = deterministicMovies(candidateQuery, candidateEvidence);
+    if (deterministic.length > 0) {
+      return { movies: deterministic, llmUsed: false, attempted };
+    }
+
+    const extracted = await extractWithLlm(candidateQuery, candidateEvidence);
+    if (extracted?.length) {
+      return { movies: extracted, llmUsed: true, attempted };
+    }
   }
 
-  return [];
+  return { movies: [], llmUsed: false, attempted };
 }
 
 async function extractWithLlm(query, evidence) {
@@ -229,7 +280,7 @@ Rules:
 - Use only the provided evidence. Do not use outside knowledge.
 - Only output a movie if the evidence has a real source page or Google showtimes entry for it.
 - Only include theater times if the exact time appears in structuredShowtimes or a provided organic result/snippet.
-- If a source page exists but no time is visible in evidence, keep theaters empty or times empty and set confidence "low".
+- If no exact showtime is visible in evidence, output no movie instead of a source-only result.
 - source_url must be one of the provided source URLs.
 - Text intended for users should be Simplified Chinese, except English movie titles and theater names.`,
       prompt: JSON.stringify({
@@ -276,8 +327,27 @@ export async function GET(request) {
   }
 
   const fallback = deterministicMovies(q, evidence);
-  const extracted = await extractWithLlm(q, evidence);
-  const movies = extracted?.length ? extracted : fallback;
+  let movies = fallback;
+  let llmUsed = false;
+  const moviePlayingCandidateCount = moviePlayingCandidates(evidence).length;
+  let candidateSearchesUsed = 0;
+
+  if (movies.length === 0) {
+    const candidateResult = await extractFromCandidateSearches(q, evidence);
+    candidateSearchesUsed = candidateResult?.attempted ?? 0;
+    if (candidateResult?.movies?.length) {
+      movies = candidateResult.movies;
+      llmUsed = Boolean(candidateResult.llmUsed);
+    }
+  }
+
+  if (movies.length === 0) {
+    const extracted = await extractWithLlm(q, evidence);
+    if (extracted?.length) {
+      movies = extracted;
+      llmUsed = true;
+    }
+  }
 
   return Response.json({
     movies,
@@ -285,7 +355,9 @@ export async function GET(request) {
       source: 'serpapi',
       structuredShowtimes: evidence.showtimes.length,
       organicResults: evidence.organicResults.length,
-      llmUsed: Boolean(extracted),
+      moviePlayingCandidates: moviePlayingCandidateCount,
+      candidateSearchesUsed,
+      llmUsed,
     },
   }, { headers: successCacheHeaders() });
 }

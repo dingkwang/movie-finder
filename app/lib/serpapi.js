@@ -93,6 +93,20 @@ function normalizeKnowledgeGraph(knowledgeGraph) {
     title: String(knowledgeGraph.title ?? '').trim(),
     description: String(knowledgeGraph.description ?? '').trim(),
     type: String(knowledgeGraph.type ?? '').trim(),
+    moviesPlaying: Array.isArray(knowledgeGraph.movies_playing)
+      ? knowledgeGraph.movies_playing
+        .map(movie => {
+          const name = String(movie?.name ?? '').trim();
+          if (!name) return null;
+          return {
+            name,
+            link: String(movie?.link ?? '').trim(),
+            serpapiLink: String(movie?.serpapi_link ?? '').trim(),
+            image: String(movie?.image ?? '').trim(),
+          };
+        })
+        .filter(Boolean)
+      : [],
   };
 }
 

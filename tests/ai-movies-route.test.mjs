@@ -125,7 +125,7 @@ describe('AI movies route', () => {
     });
   });
 
-  it('falls back to source links when SerpApi has no structured showtimes', async () => {
+  it('does not create movie cards when SerpApi has no exact showtimes', async () => {
     await withAiSearchEnv(async () => {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => Response.json({
@@ -147,12 +147,153 @@ describe('AI movies route', () => {
         const data = await res.json();
 
         assert.equal(res.status, 200);
-        assert.equal(data.movies.length, 1);
-        assert.equal(data.movies[0].title_en, 'Dear You (Teochew)');
-        assert.equal(data.movies[0].confidence, 'low');
-        assert.equal(data.movies[0].theaters.length, 0);
-        assert.equal(data.movies[0].source_url, 'https://www.regmovies.com/movies/dear-you-teochew-ho00021912?date=06-26-2026');
+        assert.deepEqual(data.movies, []);
         assert.equal(data.meta.structuredShowtimes, 0);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it('does not treat a theater-only organic result as a movie', async () => {
+    await withAiSearchEnv(async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => Response.json({
+        search_metadata: { status: 'Success' },
+        organic_results: [
+          {
+            title: 'Regal Tangram Movie Tickets and Showtimes',
+            link: 'https://www.regmovies.com/theatres/regal-tangram/1918',
+            snippet: 'Get showtimes, buy movie tickets and more at Regal Tangram movie theatre in Flushing, NY.',
+          },
+        ],
+      });
+
+      try {
+        const res = await GET(requestFor(
+          '/api/ai-movies?q=Regal%20Tangram%20Chinese%20movie%20showtimes',
+          '198.51.100.35'
+        ));
+        const data = await res.json();
+
+        assert.equal(res.status, 200);
+        assert.deepEqual(data.movies, []);
+        assert.equal(data.meta.structuredShowtimes, 0);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it('does not show source-only theater pages for broad fallback queries', async () => {
+    await withAiSearchEnv(async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => Response.json({
+        search_metadata: { status: 'Success' },
+        organic_results: [
+          {
+            title: 'Cinemark Imperial Valley Mall 14 - Movies & Showtimes',
+            link: 'https://www.cinemark.com/theatres/ca-el-centro/cinemark-imperial-valley-mall-14',
+            snippet: 'Movie theater information and tickets. Check showtimes at Cinemark Imperial Valley Mall 14.',
+          },
+        ],
+      });
+
+      try {
+        const res = await GET(requestFor(
+          '/api/ai-movies?q=10017%202026-06-21%20%E8%87%B3%202026-06-27%2010%20mile%20Chinese-language%20movie%20showtimes%20Cinemark%20Imperial%20Valley%20Mall%2014%20-%20Movies%20%26',
+          '198.51.100.37'
+        ));
+        const data = await res.json();
+
+        assert.equal(res.status, 200);
+        assert.deepEqual(data.movies, []);
+        assert.equal(data.meta.structuredShowtimes, 0);
+        assert.equal(data.meta.llmUsed, false);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it('uses Google movies_playing as candidates for a follow-up showtimes search', async () => {
+    await withAiSearchEnv(async () => {
+      const originalFetch = globalThis.fetch;
+      const seenQueries = [];
+
+      globalThis.fetch = async (url) => {
+        const parsed = new URL(String(url));
+        const q = parsed.searchParams.get('q') ?? '';
+        seenQueries.push(q);
+
+        if (q.toLowerCase().includes('movie in theater')) {
+          return Response.json({
+            search_metadata: {
+              status: 'Success',
+              google_url: 'https://www.google.com/search?q=movie+in+theater',
+            },
+            knowledge_graph: {
+              breadcrumbs: ['Movies'],
+              movies_playing: [
+                {
+                  name: 'The Furious',
+                  link: 'https://www.google.com/search?q=the+furious+showtimes',
+                  serpapi_link: 'https://serpapi.com/search.json?engine=google&q=the+furious+showtimes',
+                  image: 'https://example.com/the-furious.jpg',
+                },
+              ],
+            },
+            organic_results: [],
+          });
+        }
+
+        if (q.toLowerCase().includes('the furious showtimes')) {
+          return Response.json({
+            search_metadata: {
+              status: 'Success',
+              google_url: 'https://www.google.com/search?q=The+Furious+showtimes',
+            },
+            knowledge_graph: {
+              title: 'The Furious',
+              description: 'A revenge thriller.',
+            },
+            showtimes: [
+              {
+                theaters: [
+                  {
+                    name: 'Roxie Theater',
+                    distance: '1.2 mi',
+                    address: '3117 16th St, San Francisco, CA 94103',
+                    showing: [{ time: ['12:40pm', '3:10pm'] }],
+                  },
+                ],
+              },
+            ],
+            organic_results: [],
+          });
+        }
+
+        return Response.json({ search_metadata: { status: 'Success' }, organic_results: [] });
+      };
+
+      try {
+        const res = await GET(requestFor(
+          '/api/ai-movies?q=movie%20in%20theater%20near%2094017',
+          '198.51.100.36'
+        ));
+        const data = await res.json();
+
+        assert.equal(res.status, 200);
+        assert.equal(data.movies.length, 1);
+        assert.equal(data.movies[0].title_en, 'The Furious');
+        assert.deepEqual(data.movies[0].theaters, [
+          { name: 'Roxie Theater · 1.2 mi', times: ['12:40pm', '3:10pm'] },
+        ]);
+        assert.equal(data.meta.moviePlayingCandidates, 1);
+        assert.equal(data.meta.candidateSearchesUsed, 1);
+        assert.equal(data.meta.llmUsed, false);
+        assert.ok(seenQueries.some(query => query.toLowerCase().includes('movie in theater')));
+        assert.ok(seenQueries.some(query => query.toLowerCase().includes('the furious showtimes')));
       } finally {
         globalThis.fetch = originalFetch;
       }
