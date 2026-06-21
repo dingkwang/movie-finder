@@ -16,6 +16,7 @@ interface Movie {
   theaters: Theater[];
   source_note: string;
   source_url: string | null;
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 function extractJSON(text: string): { movies: Movie[] } | null {
@@ -31,6 +32,12 @@ function extractJSON(text: string): { movies: Movie[] } | null {
 
 function fmtTime(s: number) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function confidenceLabel(confidence: Movie['confidence']) {
+  if (confidence === 'high') return '已提取排片';
+  if (confidence === 'medium') return '有来源';
+  return '需确认';
 }
 
 function AiSearch() {
@@ -105,9 +112,9 @@ function AiSearch() {
   return (
     <main className="min-h-screen bg-gray-950 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-1 text-center">✨ AI 搜索</h1>
+        <h1 className="text-3xl font-bold mb-1 text-center">网络补查</h1>
         <p className="text-gray-400 text-center mb-2 text-sm">
-          实时搜索网络，覆盖影展、专映、小影院
+          搜索网页来源，补查标准院线源可能漏掉的排片
         </p>
         <p className="text-yellow-600/80 text-center mb-8 text-xs">
           ⚠️ AI 结果仅供参考，请点击来源链接确认实际放映时间
@@ -116,7 +123,7 @@ function AiSearch() {
         <div className="flex gap-3 justify-center mb-3">
           <input
             type="text"
-            placeholder="城市或邮编，例：San Francisco / 94041"
+            placeholder="例：Dear You showtimes near 10017 June 26 2026"
             value={q}
             onChange={e => setQ(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && search()}
@@ -147,7 +154,7 @@ function AiSearch() {
         )}
 
         {status === 'done' && movies.length === 0 && !rawText && (
-          <p className="text-gray-500 text-center">AI 也没有找到附近的华语电影</p>
+          <p className="text-gray-500 text-center">没有在网页结果里找到可用来源</p>
         )}
 
         {status === 'done' && rawText && (
@@ -162,7 +169,9 @@ function AiSearch() {
             {movies.map((m, i) => (
               <div key={i} className="bg-gray-900 rounded-xl overflow-hidden border border-amber-900/40 hover:border-amber-700/60 transition-colors">
                 <div className="w-full aspect-[2/3] bg-gradient-to-br from-gray-800 to-gray-900 flex flex-col items-center justify-center gap-2 px-4 text-center">
-                  <span className="text-xs font-semibold bg-amber-600 text-white px-2 py-0.5 rounded-full">AI</span>
+                  <span className="text-xs font-semibold bg-amber-600 text-white px-2 py-0.5 rounded-full">
+                    {confidenceLabel(m.confidence)}
+                  </span>
                   <p className="text-white font-bold text-lg leading-tight">
                     {m.title_zh ?? m.title_en ?? '未知片名'}
                   </p>
@@ -185,6 +194,9 @@ function AiSearch() {
                         </div>
                       ))}
                     </div>
+                  )}
+                  {m.theaters.length === 0 && (
+                    <p className="mb-3 text-xs text-gray-500">搜索结果里没有可直接提取的具体时间，请点来源确认。</p>
                   )}
                   {m.source_url ? (
                     <a href={m.source_url} target="_blank" rel="noopener noreferrer" className="text-amber-600/70 hover:text-amber-500 text-xs underline underline-offset-2 truncate block">

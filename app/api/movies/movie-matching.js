@@ -1,10 +1,12 @@
-export const CHINESE_LANGS = new Set(['zh', 'cmn', 'yue', 'cn', 'zh-hans', 'zh-hant']);
+export const CHINESE_LANGS = new Set(['zh', 'cmn', 'yue', 'cn', 'zh-hans', 'zh-hant', 'nan', 'hak', 'wuu', 'cdo', 'cjy', 'gan', 'hsn']);
 export const CHINESE_COUNTRIES = new Set(['CN', 'HK', 'MO', 'SG', 'TW']);
-export const CHINESE_SHOWTIME_RE = /\b(cantonese|mandarin|chinese|putonghua|guangdonghua)\b/i;
+export const CHINESE_LANGUAGE_NAME_RE = /\b(cantonese|mandarin|chinese|putonghua|guangdonghua|teochew|hokkien|min nan|minnan|chaoshan|chaozhou|hakka|shanghainese|wu)\b/i;
+export const CHINESE_SHOWTIME_RE = CHINESE_LANGUAGE_NAME_RE;
 export const CJK_RE = /[\u3400-\u9fff]/;
 export const AUDIO_LABELS = {
   mandarin: '普通话',
   cantonese: '粤语',
+  otherChinese: '其他中文',
   english: '英语',
   multi: '多语',
   unknown: '未知',
@@ -39,6 +41,7 @@ function audioCategoryFromLanguage(language) {
   if (!normalized) return null;
   if (['zh', 'cmn', 'zh-hans', 'zh-hant'].includes(normalized)) return 'mandarin';
   if (['yue', 'cn'].includes(normalized)) return 'cantonese';
+  if (['nan', 'hak', 'wuu', 'cdo', 'cjy', 'gan', 'hsn'].includes(normalized)) return 'otherChinese';
   if (normalized === 'en') return 'english';
   return null;
 }
@@ -46,6 +49,7 @@ function audioCategoryFromLanguage(language) {
 function audioCategoryFromName(name) {
   if (/mandarin|putonghua/i.test(name ?? '')) return 'mandarin';
   if (/cantonese|guangdonghua/i.test(name ?? '')) return 'cantonese';
+  if (/teochew|hokkien|min nan|minnan|chaoshan|chaozhou|hakka|shanghainese|\bwu\b/i.test(name ?? '')) return 'otherChinese';
   if (/\benglish\b/i.test(name ?? '')) return 'english';
   return null;
 }
@@ -145,7 +149,9 @@ export function hasTmsCreditOverlap(movie, tmdb) {
 
 export function hasChineseSpokenLanguage(tmdb) {
   return (tmdb?.spoken_languages ?? []).some(language => {
-    return isChineseLanguage(language.iso_639_1) || /mandarin|cantonese|chinese/i.test(language.english_name ?? '');
+    return isChineseLanguage(language.iso_639_1)
+      || CHINESE_LANGUAGE_NAME_RE.test(language.english_name ?? '')
+      || CHINESE_LANGUAGE_NAME_RE.test(language.name ?? '');
   });
 }
 

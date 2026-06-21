@@ -192,6 +192,13 @@ describe('Chinese movie matching', () => {
       }),
       '英语'
     );
+    assert.equal(
+      inferOriginalAudio({}, {
+        original_language: 'nan',
+        spoken_languages: [{ iso_639_1: 'nan', english_name: 'Teochew' }],
+      }),
+      '其他中文'
+    );
   });
 
   it('labels multi-language and unknown original audio conservatively', () => {
@@ -220,6 +227,20 @@ describe('Chinese movie matching', () => {
         showtimes: [{ quals: 'Cantonese with English subtitles' }],
       }, null),
       '粤语'
+    );
+    assert.equal(
+      inferOriginalAudio({
+        showtimes: [{ quals: 'Teochew with English subtitles' }],
+      }, null),
+      '其他中文'
+    );
+    assert.equal(
+      isAcceptedChineseMovie({
+        title: 'Dear You',
+        releaseYear: 2026,
+        showtimes: [{ quals: 'Teochew with English subtitles' }],
+      }, null),
+      true
     );
   });
 });

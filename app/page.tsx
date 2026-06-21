@@ -17,7 +17,7 @@ interface Movie {
   posterPath: string | null;
   overview: string;
   releaseDate: string;
-  originalAudio: '普通话' | '粤语' | '英语' | '多语' | '未知';
+  originalAudio: '普通话' | '粤语' | '其他中文' | '英语' | '多语' | '未知';
   theaters: Showtime[];
 }
 
@@ -140,6 +140,7 @@ const audioFilterOptions: { value: AudioFilter; label: string }[] = [
   { value: 'all', label: '所有中文' },
   { value: '普通话', label: '普通话' },
   { value: '粤语', label: '粤语' },
+  { value: '其他中文', label: '其他中文' },
   { value: '英语', label: '英语' },
   { value: '多语', label: '多语' },
   { value: '未知', label: '未知' },
@@ -274,6 +275,7 @@ export default function Home() {
   })?.days;
   const endDateMax = addDays(startDate, Math.min(29, daysBetweenInclusive(startDate, maxDate) - 1));
   const filterSummary = `${dateRangeLabel(startDate, endDate)} · ${radius} mile · ${audioFilter === 'all' ? '所有中文' : audioFilter}`;
+  const aiFallbackQuery = `${zip} ${dateRangeLabel(startDate, endDate)} ${radius} mile Chinese-language movie showtimes`;
 
   function setPresetRange(nextDays: number) {
     setStartDate(today);
@@ -549,18 +551,29 @@ export default function Home() {
         {status === 'done' && filteredMovies.length === 0 && (
           <div className="text-center">
             <p className="text-gray-500 mb-4">{zip} 附近 {filterSummary} 没有华语院线排片</p>
+            <p className="mx-auto mb-4 max-w-md text-xs leading-relaxed text-gray-600">
+              标准院线数据源可能漏掉 Regal、专映或小发行排片；空结果不等于当地一定没有。
+            </p>
             <Link
-              href={`/ai?q=${zip}`}
+              href={`/ai?q=${encodeURIComponent(aiFallbackQuery)}`}
               className="inline-block px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors"
             >
-              ✨ 用 AI 搜索（含影展 / 专映）
+              补查网络结果
             </Link>
           </div>
         )}
 
         {status === 'done' && filteredMovies.length > 0 && (
-          <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredMovies.map((m, i) => {
+          <>
+            <div className="mb-5 text-center text-xs text-gray-600">
+              没看到某部片？标准源可能漏掉 Regal、专映或小发行。
+              {' '}
+              <Link href={`/ai?q=${encodeURIComponent(aiFallbackQuery)}`} className="text-amber-500 hover:text-amber-400 underline underline-offset-2">
+                补查网络结果
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredMovies.map((m, i) => {
               const key = movieKey(m);
               const expanded = Boolean(expandedMovies[key]);
               const dateGroups = groupShowtimesByDate(m, startDate);
@@ -680,8 +693,9 @@ export default function Home() {
                 </div>
               </div>
               );
-            })}
-          </div>
+              })}
+            </div>
+          </>
         )}
       </div>
     </main>
